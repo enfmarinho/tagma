@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/tagma-raft",
+    "crates/tagma-kv",
+    "crates/tagma-wal",
+    "crates/tagma-lincheck",
+    "crates/tagma-sim",
+    "crates/tagma-node",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+authors = ["Eduardo Marinho <eduardomarinho@pm.me>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/enfmarinho/tagma"
+rust-version = "1.95"
