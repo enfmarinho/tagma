@@ -1,0 +1,51 @@
+\documentclass[12pt, a4paper, oneside]{report}
+
+\input{preamble/packages}
+\input{preamble/commands}
+
+\newcommand{\thesisTitle}{TITLE} % TODO: write title
+\newcommand{\thesisAuthor}{Eduardo Nestor Ferreira Marinho}
+\newcommand{\thesisAdvisor}{Advisor Name} % TODO: define advisor
+\newcommand{\dimap}{Department of Informatics and Applied Mathematics}
+\newcommand{\ufrn}{Federal University of Rio Grande do Norte}
+\newcommand{\thesisCity}{Natal-RN}
+% TODO: this date is just a STUB, replace it with the actual submission date
+\newcommand{\thesisMonth}{March}
+\newcommand{\thesisYear}{2027}
+
+\begin{document}
+
+\pagenumbering{roman}
+
+\input{frontmatter/cover}
+\input{frontmatter/titlepage}
+% \input{frontmatter/approval}
+% \input{frontmatter/acknowledgments}
+% \input{frontmatter/epigraph}
+% \input{frontmatter/abstract_en}
+% \input{frontmatter/abstract_pt}
+
+\listoffigures
+\addcontentsline{toc}{chapter}{\listfigurename}
+
+\listoftables
+\addcontentsline{toc}{chapter}{\listtablename}
+
+\tableofcontents
+
+\cleardoublepage%
+\pagenumbering{arabic}
+
+\input{chapters/01_introduction}
+\input{chapters/02_background}
+
+\appendix
+\input{appendices/A}
+\input{appendices/B}
+\input{appendices/C}
+
+\bibliographystyle{abntex2-alf}
+\bibliography{backmatter/references}
+\addcontentsline{toc}{chapter}{References}
+
+\end{document}

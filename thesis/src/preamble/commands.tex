@@ -1,0 +1,60 @@
+% Theorem environments
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[chapter]
+\newtheorem{example}{Example}[chapter]
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{proposition}[theorem]{Proposition}
+
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}[chapter]
+
+% Domain-specific macros
+\newcommand{\raft}{\textsc{Raft}}
+\newcommand{\ioring}{\texttt{io\_uring}}
+\newcommand{\bigo}[1]{\mathcal{O}\!\left(#1\right)}
+\newcommand{\ptail}[1]{p\textsubscript{#1}}
+
+% Listing style
+\definecolor{codebg}{gray}{0.97}
+\definecolor{codecomment}{rgb}{0.33,0.55,0.33}
+\definecolor{codekeyword}{rgb}{0.13,0.29,0.53}
+\definecolor{codestring}{rgb}{0.63,0.13,0.94}
+\definecolor{codegray}{gray}{0.5}
+
+% Page style
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\thepage}
+\fancyhead[L]{\nouppercase{\leftmark}}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Chapter heading format
+\titleformat{\chapter}[hang]
+  {\normalfont\Large\bfseries}{\thechapter}{1em}{}
+
+% Epigraph style
+\setlength{\epigraphwidth}{0.65\textwidth}
+\renewcommand{\epigraphflush}{flushright}
+\renewcommand{\epigraphrule}{0pt}
+
+% Drafting helper
+\newcommand{\stub}[1]{%
+  \par\noindent
+  \colorbox{yellow!40}{\parbox{\dimexpr\linewidth-2\fboxsep}{%
+    \textbf{[STUB]} \small #1%
+  }}\par%
+}
+
+% Figure helpers
+\newcommand{\fig}[3]{%
+  \begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/#1}
+    \caption{#2}
+    \label{fig:#3}
+  \end{figure}%
+}
