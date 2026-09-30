@@ -6,20 +6,20 @@ pub type ReadId = u64;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HardState {
     pub term: Term,
-    pub voted_for:Option<NodeId> 
+    pub voted_for: Option<NodeId>,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Entry {
     term: Term,
     index: LogIndex,
-    payload: Payload
+    payload: Payload,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Payload {
     Noop, // leader change
-    Command(Vec<u8>)
+    Command(Vec<u8>),
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
