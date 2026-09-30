@@ -17,3 +17,9 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/enfmarinho/tagma"
 rust-version = "1.95"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
