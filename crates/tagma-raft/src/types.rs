@@ -9,19 +9,22 @@ pub struct HardState {
     pub voted_for: Option<NodeId>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Entry {
-    term: Term,
-    index: LogIndex,
-    payload: Payload,
+    pub term: Term,
+    pub index: LogIndex,
+    pub payload: Payload,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Payload {
     Noop, // leader change
     Command(Vec<u8>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SnapshotMeta {
     pub last_index: LogIndex,
