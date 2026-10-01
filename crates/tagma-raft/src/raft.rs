@@ -2,7 +2,7 @@ use crate::{
     log::RaftLog,
     message::Envelope,
     rng::Rng,
-    role::Roles,
+    role::Role,
     types::{HardState, LogIndex, ReadId, SnapshotMeta},
 };
 
@@ -10,7 +10,7 @@ pub(crate) struct Raft {
     rng: Rng,
     hard_state: HardState,
     log: RaftLog,
-    role: Roles,
+    role: Role,
     commit_index: LogIndex,
     election_elapsed: u64,
     election_timeout: u64,
