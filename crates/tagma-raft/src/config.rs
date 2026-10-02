@@ -1,5 +1,6 @@
 use crate::types::NodeId;
 
+#[derive(Debug)]
 pub struct Config {
     pub id: NodeId,
     pub voters: Vec<NodeId>,

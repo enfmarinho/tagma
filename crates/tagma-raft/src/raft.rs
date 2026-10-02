@@ -10,6 +10,7 @@ use crate::{
     types::{HardState, LogIndex, ReadId, Restored, SnapshotMeta},
 };
 
+#[derive(Debug)]
 pub(crate) struct Raft {
     config: Config,
     rng: Rng,

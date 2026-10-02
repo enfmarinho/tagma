@@ -1,4 +1,5 @@
 /// SplitMix64 RNG algorithm
+#[derive(Debug)]
 pub struct Rng(u64);
 
 impl Rng {

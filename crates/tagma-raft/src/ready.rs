@@ -12,7 +12,7 @@ use crate::{
 /// 2nd: send `messages`.
 /// 3rd: apply `committed` entries to the state machine.
 /// 4th: answer `reads`.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Ready {
     pub hard_state: Option<HardState>,
     pub truncate_from: Option<LogIndex>,

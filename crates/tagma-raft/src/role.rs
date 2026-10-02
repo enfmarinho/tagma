@@ -1,6 +1,7 @@
 use crate::types::{LogIndex, NodeId};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[derive(Debug)]
 pub(crate) enum Role {
     Follower {
         leader: Option<NodeId>,
@@ -13,6 +14,7 @@ pub(crate) enum Role {
     },
 }
 
+#[derive(Debug)]
 pub struct Progress {
     next_index: LogIndex,
     match_index: LogIndex,
