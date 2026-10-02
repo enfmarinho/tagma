@@ -1,6 +1,7 @@
 use crate::{
     log::RaftLog,
     message::{Envelope, Message},
+    ready::Ready,
     rng::Rng,
     role::Role,
     types::{HardState, LogIndex, ReadId, SnapshotMeta},
@@ -15,6 +16,7 @@ pub(crate) struct Raft {
     election_elapsed: u64,
     election_timeout: u64,
     heartbeat_elapsed: u64,
+    ready: Ready,
 }
 
 impl Raft {
@@ -53,5 +55,14 @@ impl Raft {
     /// Discard entries covered by `SnapshotMeta`
     pub fn compact(&mut self, meta: SnapshotMeta) {
         todo!()
+    }
+
+    /// Takes the raft output that must be handled by the driver.
+    pub fn take_ready(&mut self) -> Option<Ready> {
+        if self.ready.empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.ready))
+        }
     }
 }

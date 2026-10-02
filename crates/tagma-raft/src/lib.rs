@@ -5,6 +5,7 @@ mod election;
 mod log;
 mod message;
 mod raft;
+mod ready;
 mod replication;
 mod rng;
 mod role;
