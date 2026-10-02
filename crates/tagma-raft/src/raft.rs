@@ -1,4 +1,5 @@
 use crate::{
+    config::Config,
     log::RaftLog,
     message::{Envelope, Message},
     ready::Ready,
@@ -8,6 +9,7 @@ use crate::{
 };
 
 pub(crate) struct Raft {
+    config: Config,
     rng: Rng,
     hard_state: HardState,
     log: RaftLog,

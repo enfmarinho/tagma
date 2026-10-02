@@ -1,6 +1,7 @@
 #![expect(dead_code)]
 #![expect(unused_variables)]
 
+mod config;
 mod election;
 mod log;
 mod message;
