@@ -44,7 +44,21 @@ impl Raft {
 
     /// Advances logical time by one tick.
     pub fn tick(&mut self) {
-        todo!()
+        match self.role {
+            Role::Leader { .. } => {
+                self.heartbeat_elapsed += 1;
+                if self.heartbeat_elapsed >= self.config.heartbeat_ticks {
+                    self.heartbeat_elapsed = 0;
+                    self.broadcast_append();
+                }
+            }
+            Role::Follower { .. } | Role::Candidate { .. } => {
+                self.election_elapsed += 1;
+                if self.election_elapsed >= self.election_timeout {
+                    self.campaign(); // note: election_elapsed is reset here
+                }
+            }
+        }
     }
 
     /// Dispatches an incoming [`Envelope`].
