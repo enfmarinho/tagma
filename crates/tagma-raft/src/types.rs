@@ -36,3 +36,8 @@ pub struct Snapshot {
     pub meta: SnapshotMeta,
     pub data: Vec<u8>,
 }
+
+pub struct ReadReady {
+    pub id: ReadId,
+    pub index: LogIndex,
+}
