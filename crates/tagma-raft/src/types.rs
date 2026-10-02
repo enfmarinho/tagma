@@ -51,3 +51,8 @@ pub struct Restored {
     pub snapshot: Option<SnapshotMeta>,
     pub entries: Vec<Entry>,
 }
+
+#[derive(Debug)]
+pub struct NotLeader {
+    pub leader_hint: Option<NodeId>,
+}
