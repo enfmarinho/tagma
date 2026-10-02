@@ -13,4 +13,8 @@ impl Rng {
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
     }
+
+    pub fn range(&mut self, lo: u64, hi: u64) -> u64 {
+        lo + self.next_u64() % (hi - lo)
+    }
 }
