@@ -7,4 +7,5 @@ mod raft;
 mod replication;
 mod rng;
 mod role;
+mod snapshot;
 mod types;
