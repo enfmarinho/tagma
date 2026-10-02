@@ -1,6 +1,6 @@
 use crate::{
     log::RaftLog,
-    message::Envelope,
+    message::{Envelope, Message},
     rng::Rng,
     role::Role,
     types::{HardState, LogIndex, ReadId, SnapshotMeta},
@@ -28,8 +28,16 @@ impl Raft {
     }
 
     /// Handle the 'Envelope' incoming message
-    pub fn step(envelope: Envelope) {
-        todo!()
+    pub fn step(&mut self, envelope: Envelope) {
+        let from = envelope.from;
+        match envelope.message {
+            Message::RequestVote(m) => self.on_request_vote(from, m),
+            Message::RequestVoteResp(m) => self.on_request_vote_resp(from, m),
+            Message::AppendEntries(m) => self.on_append_entries(from, m),
+            Message::AppendEntriesResp(m) => self.on_append_entries_resp(from, m),
+            Message::InstallSnapshot(m) => self.on_install_snapshot(from, m),
+            Message::InstallSnapshotResp(m) => self.on_install_snapshot_resp(from, m),
+        }
     }
 
     /// Append `command` to the leader log
