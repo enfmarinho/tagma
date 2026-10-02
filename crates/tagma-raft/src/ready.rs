@@ -12,6 +12,7 @@ use crate::{
 /// 2nd: send `messages`.
 /// 3rd: apply `committed` entries to the state machine.
 /// 4th: answer `reads`.
+#[derive(Default)]
 pub struct Ready {
     pub hard_state: Option<HardState>,
     pub truncate_from: Option<LogIndex>,
@@ -24,16 +25,16 @@ pub struct Ready {
 
 impl Ready {
     pub fn needs_persist(&self) -> bool {
-        todo!()
+        self.hard_state.is_some()
+            || self.truncate_from.is_some()
+            || !self.entries.is_empty()
+            || self.snapshot.is_some()
     }
 
     pub fn empty(&self) -> bool {
-        todo!()
-    }
-}
-
-impl Default for Ready {
-    fn default() -> Self {
-        todo!()
+        !self.needs_persist()
+            || self.messages.is_empty()
+            || self.committed.is_empty()
+            || self.reads.is_empty()
     }
 }
