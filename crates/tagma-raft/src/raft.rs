@@ -1,4 +1,4 @@
-use core::default::Default;
+use core::{default::Default, result::Result};
 
 use crate::{
     config::Config,
@@ -7,7 +7,7 @@ use crate::{
     ready::Ready,
     rng::Rng,
     role::Role,
-    types::{HardState, LogIndex, ReadId, Restored, SnapshotMeta},
+    types::{Entry, HardState, LogIndex, NotLeader, ReadId, Restored, SnapshotMeta},
 };
 
 #[derive(Debug)]
@@ -75,9 +75,42 @@ impl Raft {
         }
     }
 
-    /// Appends `command` to the leader's log.
-    pub fn propose(&mut self, command: Vec<u8>) {
-        todo!()
+    /// Appends `command` to the leader's log and stages it for replication.
+    ///
+    /// If the node is the leader, the command is assigned to the next log index, appended to the
+    /// log, and staged in `ready` so the driver persists in the disk and network broadcast to the
+    /// followers [`Message::AppendEntries`]
+    ///
+    /// In a single node cluster, where the leader alone forms a quorum, the commit index advances
+    /// immediately
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NotLeader`] if the local node is not a [`Role::Leader`].
+    pub fn propose(&mut self, command: Vec<u8>) -> Result<LogIndex, NotLeader> {
+        match self.role {
+            Role::Follower { leader } => {
+                return Err(NotLeader {
+                    leader_hint: leader,
+                });
+            }
+            Role::Candidate { .. } => return Err(NotLeader { leader_hint: None }),
+            Role::Leader { .. } => (),
+        }
+
+        let index = self.log.last_index() + 1;
+
+        let entry = Entry {
+            term: self.hard_state.term,
+            index,
+            payload: crate::types::Payload::Command(command),
+        };
+
+        self.append_local(&[entry]);
+        self.try_advance_commit();
+        self.broadcast_append();
+
+        Ok(index)
     }
 
     /// Registers a linearisable read request for `id`.
@@ -98,4 +131,12 @@ impl Raft {
             Some(std::mem::take(&mut self.ready))
         }
     }
+
+    /// Appends the log and update `self.ready`, adding command to `entries`.
+    fn append_local(&mut self, entries: &[Entry]) {
+        todo!()
+    }
+
+    /// Checks if there is quorum to advance the commit index, if so advance it.
+    fn try_advance_commit(&mut self) {}
 }
