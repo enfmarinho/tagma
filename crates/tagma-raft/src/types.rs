@@ -41,3 +41,9 @@ pub struct ReadReady {
     pub id: ReadId,
     pub index: LogIndex,
 }
+
+pub struct Restored {
+    pub hard_state: HardState,
+    pub snapshot: Option<SnapshotMeta>,
+    pub entries: Vec<Entry>,
+}
