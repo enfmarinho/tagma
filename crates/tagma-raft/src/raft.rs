@@ -24,12 +24,12 @@ impl Raft {
         todo!()
     }
 
-    /// Advance logical time by one tick
+    /// Advances logical time by one tick.
     pub fn tick(&mut self) {
         todo!()
     }
 
-    /// Handle the 'Envelope' incoming message
+    /// Dispatches an incoming [`Envelope`].
     pub fn step(&mut self, envelope: Envelope) {
         let from = envelope.from;
         match envelope.message {
@@ -42,17 +42,17 @@ impl Raft {
         }
     }
 
-    /// Append `command` to the leader log
+    /// Appends `command` to the leader's log.
     pub fn propose(&mut self, command: Vec<u8>) {
         todo!()
     }
 
-    /// Register a linearisable read
+    /// Registers a linearisable read request for `id`.
     pub fn read_index(&self, id: ReadId) {
         todo!()
     }
 
-    /// Discard entries covered by `SnapshotMeta`
+    /// Discards entries covered by `meta`.
     pub fn compact(&mut self, meta: SnapshotMeta) {
         todo!()
     }
