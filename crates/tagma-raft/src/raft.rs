@@ -1,3 +1,5 @@
+use core::default::Default;
+
 use crate::{
     config::Config,
     log::RaftLog,
@@ -5,7 +7,7 @@ use crate::{
     ready::Ready,
     rng::Rng,
     role::Role,
-    types::{HardState, LogIndex, ReadId, SnapshotMeta},
+    types::{HardState, LogIndex, ReadId, Restored, SnapshotMeta},
 };
 
 pub(crate) struct Raft {
@@ -22,8 +24,22 @@ pub(crate) struct Raft {
 }
 
 impl Raft {
-    pub fn new() -> Self {
-        todo!()
+    pub fn new(config: Config, restored: Restored) -> Self {
+        let mut rng = Rng::new(config.seed);
+        let (lo, hi) = config.election_ticks;
+        let election_timeout = rng.range(lo, hi);
+        Self {
+            config,
+            rng,
+            hard_state: restored.hard_state,
+            log: RaftLog::restore(restored.snapshot, restored.entries),
+            role: Role::Follower { leader: None },
+            commit_index: restored.snapshot.map_or(0, |s| s.last_index),
+            election_elapsed: 0,
+            election_timeout,
+            heartbeat_elapsed: 0,
+            ready: Ready::default(),
+        }
     }
 
     /// Advances logical time by one tick.
