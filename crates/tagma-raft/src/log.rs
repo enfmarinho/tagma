@@ -131,6 +131,19 @@ mod tests {
     }
 
     #[test]
+    fn snapshot() {
+        let meta = SnapshotMeta {
+            last_index: 10,
+            last_term: 4,
+        };
+        let log = RaftLog::restore(Some(meta), vec![]);
+
+        assert_eq!(log.last_index(), 10);
+        assert_eq!(log.last_term(), 4);
+        assert_eq!(log.snapshot(), Some(meta));
+    }
+
+    #[test]
     fn append_extends_log() {
         let mut log = RaftLog::restore(None, vec![]);
 
@@ -181,6 +194,19 @@ mod tests {
         });
         assert_eq!(log.term_at(6), Some(3));
         assert_eq!(log.term_at(7), None);
+    }
+
+    #[test]
+    fn term_at_compacted_boundaries() {
+        let mut log = RaftLog::restore(None, vec![entry(1, 1), entry(2, 2), entry(3, 2)]);
+
+        log.compact(SnapshotMeta {
+            last_index: 2,
+            last_term: 2,
+        });
+
+        assert_eq!(log.term_at(1), None);
+        assert_eq!(log.term_at(2), Some(2));
     }
 
     #[test]
@@ -242,5 +268,19 @@ mod tests {
             last_index: 3,
             last_term: 2,
         });
+    }
+
+    #[test]
+    fn compact_noop() {
+        let mut log = RaftLog::restore(None, vec![entry(1, 1), entry(2, 1), entry(3, 1)]);
+        let meta = SnapshotMeta {
+            last_index: 2,
+            last_term: 1,
+        };
+
+        log.compact(meta);
+        log.compact(meta);
+
+        assert_eq!(log.offset(), 2);
     }
 }
