@@ -120,7 +120,13 @@ impl Raft {
 
     /// Discards entries covered by `meta`.
     pub fn compact(&mut self, meta: SnapshotMeta) {
-        todo!()
+        debug_assert!(
+            meta.last_index <= self.commit_index,
+            "snapshot at {} index is past commit index {}",
+            meta.last_index,
+            self.commit_index
+        );
+        self.log.compact(meta);
     }
 
     /// Takes the raft output that must be handled by the driver.
