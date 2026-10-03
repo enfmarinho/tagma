@@ -144,5 +144,7 @@ impl Raft {
     }
 
     /// Checks if there is quorum to advance the commit index, if so advance it.
-    fn try_advance_commit(&mut self) {}
+    fn try_advance_commit(&mut self) {
+        todo!()
+    }
 }
