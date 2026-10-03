@@ -1,5 +1,6 @@
 use crate::types::{Entry, LogIndex, NodeId, Snapshot, Term};
 
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Envelope {
     pub from: NodeId,
@@ -7,6 +8,7 @@ pub struct Envelope {
     pub message: Message,
 }
 
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Message {
     RequestVote(RequestVote),
@@ -30,6 +32,7 @@ impl Message {
     }
 }
 
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RequestVote {
     pub term: Term,
@@ -37,12 +40,14 @@ pub struct RequestVote {
     pub last_log_term: Term,
 }
 
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RequestVoteResp {
     pub term: Term,
     pub granted: bool,
 }
 
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AppendEntries {
     pub term: Term,
@@ -52,18 +57,21 @@ pub struct AppendEntries {
     pub leader_commit: LogIndex,
 }
 
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AppendEntriesResp {
     pub term: Term,
     pub success: bool,
 }
 
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InstallSnapshot {
     pub term: Term,
     pub snapshot: Snapshot,
 }
 
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InstallSnapshotResp {
     pub term: Term,

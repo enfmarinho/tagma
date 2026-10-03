@@ -1,4 +1,5 @@
 /// SplitMix64 RNG algorithm
+#[derive(Debug)]
 pub struct Rng(u64);
 
 impl Rng {
@@ -12,5 +13,9 @@ impl Rng {
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
+    }
+
+    pub fn range(&mut self, lo: u64, hi: u64) -> u64 {
+        lo + self.next_u64() % (hi - lo)
     }
 }

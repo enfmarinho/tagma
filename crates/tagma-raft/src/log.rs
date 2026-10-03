@@ -1,5 +1,6 @@
 use crate::types::{Entry, LogIndex, SnapshotMeta, Term};
 
+#[derive(Debug)]
 pub(crate) struct RaftLog {
     snapshot: Option<SnapshotMeta>,
     entries: Vec<Entry>,
