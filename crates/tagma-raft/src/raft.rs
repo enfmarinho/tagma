@@ -7,21 +7,21 @@ use crate::{
     ready::Ready,
     rng::Rng,
     role::Role,
-    types::{Entry, HardState, LogIndex, NotLeader, ReadId, Restored, SnapshotMeta},
+    types::{Entry, HardState, LogIndex, NodeId, NotLeader, ReadId, Restored, SnapshotMeta, Term},
 };
 
 #[derive(Debug)]
 pub(crate) struct Raft {
-    config: Config,
-    rng: Rng,
-    hard_state: HardState,
-    log: RaftLog,
-    role: Role,
-    commit_index: LogIndex,
-    election_elapsed: u64,
-    election_timeout: u64,
-    heartbeat_elapsed: u64,
-    ready: Ready,
+    pub config: Config,
+    pub rng: Rng,
+    pub hard_state: HardState,
+    pub log: RaftLog,
+    pub role: Role,
+    pub commit_index: LogIndex,
+    pub election_elapsed: u64,
+    pub election_timeout: u64,
+    pub heartbeat_elapsed: u64,
+    pub ready: Ready,
 }
 
 impl Raft {
@@ -145,5 +145,24 @@ impl Raft {
     /// Checks if there is quorum to advance the commit index, if so advance it.
     fn try_advance_commit(&mut self) {
         todo!()
+    }
+
+    pub(crate) fn update_hard_state(&mut self, term: Term, voted_for: Option<NodeId>) {
+        self.hard_state = HardState { term, voted_for };
+    }
+
+    pub(crate) fn send(ready: &mut Ready, from: NodeId, to: NodeId, message: Message) {
+        ready.messages.push(Envelope { from, to, message });
+    }
+
+    pub(crate) fn send_all(&mut self, message: Message) {
+        let id = self.config.id;
+        for &voter in &self.config.voters {
+            if voter == id {
+                // avoid sending a message to ourself
+                continue;
+            }
+            Self::send(&mut self.ready, id, voter, message.clone());
+        }
     }
 }

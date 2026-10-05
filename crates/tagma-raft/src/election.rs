@@ -26,6 +26,9 @@ impl Raft {
     }
 
     pub fn reset_election_timer(&mut self) {
-        todo!()
+        self.election_elapsed = 0;
+        self.election_timeout = self
+            .rng
+            .range(self.config.min_election_tick, self.config.max_election_tick);
     }
 }
