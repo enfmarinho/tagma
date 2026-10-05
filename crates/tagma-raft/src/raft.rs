@@ -27,8 +27,7 @@ pub(crate) struct Raft {
 impl Raft {
     pub fn new(config: Config, restored: Restored) -> Self {
         let mut rng = Rng::new(config.seed);
-        let (lo, hi) = config.election_ticks;
-        let election_timeout = rng.range(lo, hi);
+        let election_timeout = rng.range(config.min_election_tick, config.max_election_tick);
         Self {
             config,
             rng,
