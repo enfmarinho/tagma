@@ -139,7 +139,8 @@ impl Raft {
 
     /// Appends the log and update `self.ready`, adding command to `entries`.
     pub(crate) fn append_local(&mut self, entries: &[Entry]) {
-        todo!()
+        self.log.append(entries);
+        self.ready.entries.extend_from_slice(entries);
     }
 
     pub(crate) fn update_hard_state(&mut self, term: Term, voted_for: Option<NodeId>) {
