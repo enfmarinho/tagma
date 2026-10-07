@@ -3,32 +3,31 @@ use core::{default::Default, result::Result};
 use crate::{
     config::Config,
     log::RaftLog,
-    message::{Envelope, Message},
+    message::{AppendEntries, Envelope, Message},
     ready::Ready,
     rng::Rng,
     role::Role,
-    types::{Entry, HardState, LogIndex, NotLeader, ReadId, Restored, SnapshotMeta},
+    types::{Entry, HardState, LogIndex, NodeId, NotLeader, ReadId, Restored, SnapshotMeta, Term},
 };
 
 #[derive(Debug)]
 pub(crate) struct Raft {
-    config: Config,
-    rng: Rng,
-    hard_state: HardState,
-    log: RaftLog,
-    role: Role,
-    commit_index: LogIndex,
-    election_elapsed: u64,
-    election_timeout: u64,
-    heartbeat_elapsed: u64,
-    ready: Ready,
+    pub config: Config,
+    pub rng: Rng,
+    pub hard_state: HardState,
+    pub log: RaftLog,
+    pub role: Role,
+    pub commit_index: LogIndex,
+    pub election_elapsed: u64,
+    pub election_timeout: u64,
+    pub heartbeat_elapsed: u64,
+    pub ready: Ready,
 }
 
 impl Raft {
     pub fn new(config: Config, restored: Restored) -> Self {
         let mut rng = Rng::new(config.seed);
-        let (lo, hi) = config.election_ticks;
-        let election_timeout = rng.range(lo, hi);
+        let election_timeout = rng.range(config.min_election_tick, config.max_election_tick);
         Self {
             config,
             rng,
@@ -50,7 +49,7 @@ impl Raft {
                 self.heartbeat_elapsed += 1;
                 if self.heartbeat_elapsed >= self.config.heartbeat_ticks {
                     self.heartbeat_elapsed = 0;
-                    self.broadcast_append();
+                    self.send_heartbeats();
                 }
             }
             Role::Follower { .. } | Role::Candidate { .. } => {
@@ -107,7 +106,7 @@ impl Raft {
         };
 
         self.append_local(&[entry]);
-        self.try_advance_commit();
+        self.maybe_advance_commit();
         self.broadcast_append();
 
         Ok(index)
@@ -139,12 +138,37 @@ impl Raft {
     }
 
     /// Appends the log and update `self.ready`, adding command to `entries`.
-    fn append_local(&mut self, entries: &[Entry]) {
+    pub(crate) fn append_local(&mut self, entries: &[Entry]) {
         todo!()
     }
 
-    /// Checks if there is quorum to advance the commit index, if so advance it.
-    fn try_advance_commit(&mut self) {
-        todo!()
+    pub(crate) fn update_hard_state(&mut self, term: Term, voted_for: Option<NodeId>) {
+        self.hard_state = HardState { term, voted_for };
+    }
+
+    pub(crate) fn send(ready: &mut Ready, from: NodeId, to: NodeId, message: Message) {
+        ready.messages.push(Envelope { from, to, message });
+    }
+
+    pub(crate) fn send_all(&mut self, message: Message) {
+        let id = self.config.id;
+        for &voter in &self.config.voters {
+            if voter == id {
+                // avoid sending a message to ourself
+                continue;
+            }
+            Self::send(&mut self.ready, id, voter, message.clone());
+        }
+    }
+
+    pub(crate) fn send_heartbeats(&mut self) {
+        debug_assert!(matches!(self.role, Role::Leader { .. }));
+        self.send_all(Message::AppendEntries(AppendEntries {
+            term: self.hard_state.term,
+            prev_log_index: self.log.last_index(),
+            prev_log_term: self.log.last_term(),
+            entries: Vec::new(),
+            leader_commit: self.commit_index,
+        }));
     }
 }

@@ -10,12 +10,12 @@ pub(crate) enum Role {
         votes: BTreeSet<NodeId>,
     },
     Leader {
-        next_index: BTreeMap<NodeId, Progress>,
+        progress: BTreeMap<NodeId, Progress>,
     },
 }
 
 #[derive(Debug)]
 pub struct Progress {
-    next_index: LogIndex,
-    match_index: LogIndex,
+    pub(crate) next_index: LogIndex,
+    pub(crate) match_index: LogIndex,
 }

@@ -5,6 +5,11 @@ use crate::{
 };
 
 impl Raft {
+    /// Returns the minimum number of voters to achieve a quorum.
+    pub(crate) fn quorum(&self) -> usize {
+        self.config.voters.len() / 2 + 1
+    }
+
     pub fn on_append_entries(&mut self, from: NodeId, msg: AppendEntries) {
         todo!()
     }
@@ -21,6 +26,7 @@ impl Raft {
         todo!()
     }
 
+    /// Checks if there is quorum to advance the commit index, if so advance it.
     pub fn maybe_advance_commit(&mut self) {
         todo!()
     }
