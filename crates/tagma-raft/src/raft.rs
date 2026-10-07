@@ -3,7 +3,7 @@ use core::{default::Default, result::Result};
 use crate::{
     config::Config,
     log::RaftLog,
-    message::{Envelope, Message},
+    message::{AppendEntries, Envelope, Message},
     ready::Ready,
     rng::Rng,
     role::Role,
@@ -49,7 +49,7 @@ impl Raft {
                 self.heartbeat_elapsed += 1;
                 if self.heartbeat_elapsed >= self.config.heartbeat_ticks {
                     self.heartbeat_elapsed = 0;
-                    self.broadcast_append();
+                    self.send_heartbeats();
                 }
             }
             Role::Follower { .. } | Role::Candidate { .. } => {
@@ -164,5 +164,16 @@ impl Raft {
             }
             Self::send(&mut self.ready, id, voter, message.clone());
         }
+    }
+
+    pub(crate) fn send_heartbeats(&mut self) {
+        debug_assert!(matches!(self.role, Role::Leader { .. }));
+        self.send_all(Message::AppendEntries(AppendEntries {
+            term: self.hard_state.term,
+            prev_log_index: self.log.last_index(),
+            prev_log_term: self.log.last_term(),
+            entries: Vec::new(),
+            leader_commit: self.commit_index,
+        }));
     }
 }
