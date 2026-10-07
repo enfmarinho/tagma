@@ -26,6 +26,7 @@ impl Raft {
         todo!()
     }
 
+    /// Checks if there is quorum to advance the commit index, if so advance it.
     pub fn maybe_advance_commit(&mut self) {
         todo!()
     }

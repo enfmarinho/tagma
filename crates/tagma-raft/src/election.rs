@@ -97,10 +97,10 @@ impl Raft {
 
     pub fn become_leader(&mut self) {
         let last_index = self.log.last_index();
-        let mut next_index: BTreeMap<NodeId, Progress> = BTreeMap::new();
+        let mut progress: BTreeMap<NodeId, Progress> = BTreeMap::new();
         for &voter in &self.config.voters {
             let is_self = voter == self.config.id;
-            next_index.insert(
+            progress.insert(
                 voter,
                 Progress {
                     next_index: last_index + 1,
@@ -109,7 +109,7 @@ impl Raft {
             );
         }
 
-        self.role = Role::Leader { next_index };
+        self.role = Role::Leader { progress };
         self.heartbeat_elapsed = 0;
 
         // append no-op entry

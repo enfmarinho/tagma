@@ -10,7 +10,7 @@ pub(crate) enum Role {
         votes: BTreeSet<NodeId>,
     },
     Leader {
-        next_index: BTreeMap<NodeId, Progress>,
+        progress: BTreeMap<NodeId, Progress>,
     },
 }
 

@@ -106,7 +106,7 @@ impl Raft {
         };
 
         self.append_local(&[entry]);
-        self.try_advance_commit();
+        self.maybe_advance_commit();
         self.broadcast_append();
 
         Ok(index)
@@ -138,12 +138,7 @@ impl Raft {
     }
 
     /// Appends the log and update `self.ready`, adding command to `entries`.
-    fn append_local(&mut self, entries: &[Entry]) {
-        todo!()
-    }
-
-    /// Checks if there is quorum to advance the commit index, if so advance it.
-    fn try_advance_commit(&mut self) {
+    pub(crate) fn append_local(&mut self, entries: &[Entry]) {
         todo!()
     }
 
