@@ -16,6 +16,6 @@ pub(crate) enum Role {
 
 #[derive(Debug)]
 pub struct Progress {
-    next_index: LogIndex,
-    match_index: LogIndex,
+    pub(crate) next_index: LogIndex,
+    pub(crate) match_index: LogIndex,
 }
