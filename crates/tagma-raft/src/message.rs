@@ -61,6 +61,7 @@ pub struct AppendEntries {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AppendEntriesResp {
     pub term: Term,
+    pub last_index: LogIndex,
     pub success: bool,
 }
 

@@ -1,6 +1,7 @@
 use crate::{
     message::{AppendEntries, AppendEntriesResp},
     raft::Raft,
+    role::Role,
     types::NodeId,
 };
 
@@ -15,7 +16,35 @@ impl Raft {
     }
 
     pub fn on_append_entries_resp(&mut self, from: NodeId, msg: AppendEntriesResp) {
-        todo!()
+        if msg.term > self.hard_state.term {
+            self.become_follower(msg.term, None);
+            return;
+        }
+        if msg.term < self.hard_state.term {
+            return;
+        }
+
+        let Role::Leader { progress } = &mut self.role else {
+            return;
+        };
+
+        let Some(follower_progress) = progress.get_mut(&from) else {
+            return;
+        };
+
+        if msg.success {
+            if msg.last_index > follower_progress.next_index {
+                follower_progress.match_index = msg.last_index;
+                follower_progress.next_index = follower_progress.next_index.max(msg.last_index + 1);
+                self.maybe_advance_commit();
+            }
+        } else {
+            follower_progress.next_index = follower_progress
+                .next_index
+                .saturating_sub(1)
+                .max(follower_progress.match_index + 1);
+            self.send_append(from);
+        }
     }
 
     pub fn send_append(&mut self, to: NodeId) {
