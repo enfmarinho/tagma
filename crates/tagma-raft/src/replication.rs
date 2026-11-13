@@ -6,6 +6,8 @@ use crate::{
 };
 
 impl Raft {
+    const MAX_APPEND_ENTRY_SIZE: usize = 12;
+
     /// Returns the minimum number of voters to achieve a quorum.
     pub(crate) fn quorum(&self) -> usize {
         self.config.voters.len() / 2 + 1
@@ -106,11 +108,52 @@ impl Raft {
     }
 
     pub fn send_append(&mut self, to: NodeId) {
-        todo!()
+        // TODO: handle InstallSnapshot
+
+        let Role::Leader { progress } = &mut self.role else {
+            unreachable!("Trying to send append but is not leader");
+        };
+
+        let Some(follower_progress) = progress.get_mut(&to) else {
+            return;
+        };
+
+        let prev_log_index = follower_progress.next_index.saturating_sub(1);
+        let prev_log_term = self
+            .log
+            .term_at(prev_log_index)
+            .expect("prev_log_index missing from log when trying to send append");
+
+        let entries = self
+            .log
+            .entries_from(prev_log_index, Self::MAX_APPEND_ENTRY_SIZE)
+            .to_vec();
+
+        Self::send(
+            &mut self.ready,
+            self.config.id,
+            to,
+            Message::AppendEntries(AppendEntries {
+                term: self.hard_state.term,
+                prev_log_index,
+                prev_log_term,
+                entries,
+                leader_commit: self.commit_index,
+            }),
+        );
     }
 
     pub fn broadcast_append(&mut self) {
-        todo!()
+        let Role::Leader { progress } = &mut self.role else {
+            unreachable!("Trying to broadcast append but is not leader");
+        };
+
+        for i in 0..self.config.voters.len() {
+            let peer = self.config.voters[i];
+            if peer != self.config.id {
+                self.send_append(peer);
+            }
+        }
     }
 
     /// Checks if there is quorum to advance the commit index, if so advance it.
