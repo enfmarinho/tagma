@@ -64,6 +64,9 @@ dependencies = [
 [[package]]
 name = "tagma-kv"
 version = "0.0.1"
+dependencies = [
+ "tagma-raft",
+]
 
 [[package]]
 name = "tagma-lincheck"

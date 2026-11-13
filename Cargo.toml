@@ -19,6 +19,11 @@ repository = "https://github.com/enfmarinho/tagma"
 rust-version = "1.95"
 
 [workspace.dependencies]
+tagma-raft = { path = "crates/tagma-raft" }
+tagma-kv = { path = "crates/tagma-kv" }
+tagma-wal = { path = "crates/tagma-wal" }
+tagma-lincheck = { path = "crates/tagma-lincheck" }
+
 serde = { version = "1", features = ["derive"] }
 
 [workspace.lints.clippy]
