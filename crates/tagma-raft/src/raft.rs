@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) struct Raft {
+pub struct Raft {
     pub config: Config,
     pub rng: Rng,
     pub hard_state: HardState,
