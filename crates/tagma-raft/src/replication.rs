@@ -1,33 +1,177 @@
 use crate::{
-    message::{AppendEntries, AppendEntriesResp},
+    message::{AppendEntries, AppendEntriesResp, Message},
     raft::Raft,
-    types::NodeId,
+    role::Role,
+    types::{LogIndex, NodeId},
 };
 
 impl Raft {
+    const MAX_APPEND_ENTRY_SIZE: usize = 12;
+
     /// Returns the minimum number of voters to achieve a quorum.
     pub(crate) fn quorum(&self) -> usize {
         self.config.voters.len() / 2 + 1
     }
 
     pub fn on_append_entries(&mut self, from: NodeId, msg: AppendEntries) {
-        todo!()
+        if msg.term < self.hard_state.term {
+            // stale message
+            Self::send(
+                &mut self.ready,
+                self.config.id,
+                from,
+                Message::AppendEntriesResp(AppendEntriesResp {
+                    term: self.hard_state.term,
+                    last_index: msg.prev_log_index,
+                    success: false,
+                }),
+            );
+            return;
+        }
+
+        if msg.term > self.hard_state.term || matches!(self.role, Role::Candidate { .. }) {
+            self.become_follower(msg.term, Some(from));
+        }
+        assert!(matches!(self.role, Role::Follower { .. }));
+
+        self.reset_election_timer();
+
+        // Log Matching Property
+        let prev_matches = self
+            .log
+            .term_at(msg.prev_log_index)
+            .is_some_and(|t| t == msg.prev_log_term);
+        if !prev_matches {
+            Self::send(
+                &mut self.ready,
+                self.config.id,
+                from,
+                Message::AppendEntriesResp(AppendEntriesResp {
+                    term: self.hard_state.term,
+                    last_index: msg.prev_log_index,
+                    success: false,
+                }),
+            );
+            return;
+        }
+
+        // TODO, cannot do this
+        self.log.append(&msg.entries);
+
+        let last_new_index = msg.prev_log_index + msg.entries.len() as u64;
+        if msg.leader_commit > self.commit_index {
+            self.commit_index = msg.leader_commit.min(last_new_index);
+        }
+
+        Self::send(
+            &mut self.ready,
+            self.config.id,
+            from,
+            Message::AppendEntriesResp(AppendEntriesResp {
+                term: self.hard_state.term,
+                last_index: last_new_index,
+                success: true,
+            }),
+        );
     }
 
     pub fn on_append_entries_resp(&mut self, from: NodeId, msg: AppendEntriesResp) {
-        todo!()
+        if msg.term > self.hard_state.term {
+            self.become_follower(msg.term, None);
+            return;
+        }
+        if msg.term < self.hard_state.term {
+            return;
+        }
+
+        let Role::Leader { progress } = &mut self.role else {
+            return;
+        };
+
+        let Some(follower_progress) = progress.get_mut(&from) else {
+            return;
+        };
+
+        if msg.success {
+            if msg.last_index > follower_progress.next_index {
+                follower_progress.match_index = msg.last_index;
+                follower_progress.next_index = follower_progress.next_index.max(msg.last_index + 1);
+                self.maybe_advance_commit();
+            }
+        } else {
+            follower_progress.next_index = follower_progress
+                .next_index
+                .saturating_sub(1)
+                .max(follower_progress.match_index + 1);
+            self.send_append(from);
+        }
     }
 
     pub fn send_append(&mut self, to: NodeId) {
-        todo!()
+        // TODO: handle InstallSnapshot
+
+        let Role::Leader { progress } = &mut self.role else {
+            unreachable!("Trying to send append but is not leader");
+        };
+
+        let Some(follower_progress) = progress.get_mut(&to) else {
+            return;
+        };
+
+        let prev_log_index = follower_progress.next_index.saturating_sub(1);
+        let prev_log_term = self
+            .log
+            .term_at(prev_log_index)
+            .expect("prev_log_index missing from log when trying to send append");
+
+        let entries = self
+            .log
+            .entries_from(prev_log_index, Self::MAX_APPEND_ENTRY_SIZE)
+            .to_vec();
+
+        Self::send(
+            &mut self.ready,
+            self.config.id,
+            to,
+            Message::AppendEntries(AppendEntries {
+                term: self.hard_state.term,
+                prev_log_index,
+                prev_log_term,
+                entries,
+                leader_commit: self.commit_index,
+            }),
+        );
     }
 
     pub fn broadcast_append(&mut self) {
-        todo!()
+        let Role::Leader { progress } = &mut self.role else {
+            unreachable!("Trying to broadcast append but is not leader");
+        };
+
+        for i in 0..self.config.voters.len() {
+            let peer = self.config.voters[i];
+            if peer != self.config.id {
+                self.send_append(peer);
+            }
+        }
     }
 
     /// Checks if there is quorum to advance the commit index, if so advance it.
     pub fn maybe_advance_commit(&mut self) {
-        todo!()
+        let Role::Leader { progress } = &mut self.role else {
+            unreachable!("Trying to advance commit but is not leader");
+        };
+
+        let mut match_indexes: Vec<LogIndex> = progress.values().map(|p| p.match_index).collect();
+        match_indexes.push(self.log.last_index());
+
+        let target_index = match_indexes.len() - self.quorum();
+        let (_, &mut candidate_commit, _) = match_indexes.select_nth_unstable(target_index);
+
+        if candidate_commit > self.commit_index
+            && self.log.term_at(candidate_commit) == Some(self.hard_state.term)
+        {
+            self.commit_index = candidate_commit;
+        }
     }
 }
