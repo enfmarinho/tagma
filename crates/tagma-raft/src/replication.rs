@@ -2,7 +2,7 @@ use crate::{
     message::{AppendEntries, AppendEntriesResp, Message},
     raft::Raft,
     role::Role,
-    types::NodeId,
+    types::{LogIndex, NodeId},
 };
 
 impl Raft {
@@ -158,6 +158,20 @@ impl Raft {
 
     /// Checks if there is quorum to advance the commit index, if so advance it.
     pub fn maybe_advance_commit(&mut self) {
-        todo!()
+        let Role::Leader { progress } = &mut self.role else {
+            unreachable!("Trying to advance commit but is not leader");
+        };
+
+        let mut match_indexes: Vec<LogIndex> = progress.values().map(|p| p.match_index).collect();
+        match_indexes.push(self.log.last_index());
+
+        let target_index = match_indexes.len() - self.quorum();
+        let (_, &mut candidate_commit, _) = match_indexes.select_nth_unstable(target_index);
+
+        if candidate_commit > self.commit_index
+            && self.log.term_at(candidate_commit) == Some(self.hard_state.term)
+        {
+            self.commit_index = candidate_commit;
+        }
     }
 }
