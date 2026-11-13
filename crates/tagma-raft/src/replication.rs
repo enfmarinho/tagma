@@ -1,5 +1,5 @@
 use crate::{
-    message::{AppendEntries, AppendEntriesResp},
+    message::{AppendEntries, AppendEntriesResp, Message},
     raft::Raft,
     role::Role,
     types::NodeId,
@@ -12,7 +12,65 @@ impl Raft {
     }
 
     pub fn on_append_entries(&mut self, from: NodeId, msg: AppendEntries) {
-        todo!()
+        if msg.term < self.hard_state.term {
+            // stale message
+            Self::send(
+                &mut self.ready,
+                self.config.id,
+                from,
+                Message::AppendEntriesResp(AppendEntriesResp {
+                    term: self.hard_state.term,
+                    last_index: msg.prev_log_index,
+                    success: false,
+                }),
+            );
+            return;
+        }
+
+        if msg.term > self.hard_state.term || matches!(self.role, Role::Candidate { .. }) {
+            self.become_follower(msg.term, Some(from));
+        }
+        assert!(matches!(self.role, Role::Follower { .. }));
+
+        self.reset_election_timer();
+
+        // Log Matching Property
+        let prev_matches = self
+            .log
+            .term_at(msg.prev_log_index)
+            .is_some_and(|t| t == msg.prev_log_term);
+        if !prev_matches {
+            Self::send(
+                &mut self.ready,
+                self.config.id,
+                from,
+                Message::AppendEntriesResp(AppendEntriesResp {
+                    term: self.hard_state.term,
+                    last_index: msg.prev_log_index,
+                    success: false,
+                }),
+            );
+            return;
+        }
+
+        // TODO, cannot do this
+        self.log.append(&msg.entries);
+
+        let last_new_index = msg.prev_log_index + msg.entries.len() as u64;
+        if msg.leader_commit > self.commit_index {
+            self.commit_index = msg.leader_commit.min(last_new_index);
+        }
+
+        Self::send(
+            &mut self.ready,
+            self.config.id,
+            from,
+            Message::AppendEntriesResp(AppendEntriesResp {
+                term: self.hard_state.term,
+                last_index: last_new_index,
+                success: true,
+            }),
+        );
     }
 
     pub fn on_append_entries_resp(&mut self, from: NodeId, msg: AppendEntriesResp) {
