@@ -26,6 +26,7 @@ tagma-lincheck = { path = "crates/tagma-lincheck" }
 
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", default-features = false, features = ["alloc"]}
+crc32fast = "1.5.5"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
