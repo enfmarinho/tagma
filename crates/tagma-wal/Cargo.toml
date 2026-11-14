@@ -9,3 +9,5 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+tagma-raft.workspace = true
+postcard.workspace = true

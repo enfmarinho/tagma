@@ -125,6 +125,10 @@ version = "0.0.1"
 [[package]]
 name = "tagma-wal"
 version = "0.0.1"
+dependencies = [
+ "postcard",
+ "tagma-raft",
+]
 
 [[package]]
 name = "thiserror"
