@@ -9,5 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-tagma-raft.workspace = true
+tagma-raft = { workspace = true, features = ["serde"] }
 postcard.workspace = true
+crc32fast.workspace = true
+serde.workspace = true
