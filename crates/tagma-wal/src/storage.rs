@@ -36,8 +36,36 @@ impl<F: Fs> Storage<F> {
         todo!()
     }
 
-    /// Step on of the [`Ready`] contract. Persist the durable state to the disk
+    /// Step 1 of the [`Ready`] contract. Persist the durable state to disk.
     /// Returns only when data is persisted
+    ///
+    /// # Binary Frame Specification
+    /// All data is encoded in little endian order.
+    /// `Length` is the number of bytes of `Batch Header + Entries payload`.
+    /// `CRC32` is the checksum over the Batch Header and Entries payload bytes.
+    ///
+    /// ```text
+    /// |---------------------------------------------------------------------|
+    /// | Magic (4B)    | Length (4B)    | CRC32 (4B)                         |
+    /// |---------------------------------------------------------------------|
+    /// | Batch Header:                                                       |
+    /// |     has_hard_state (1B) | term(8B) | vote (8B) | commit (8B)        |
+    /// |     has_truncate (1B)   | truncate_from (8B)                        |  
+    /// |     has_snapshot (1B)   | snap_index (8B)     | snap_term (8B)      |
+    /// |     entry_count(8B)                                                 |
+    /// |---------------------------------------------------------------------|
+    /// | Entries payload:                                                    |
+    /// |     [Entry 0: index (8B) | term (8B) | type (1B) | len (4B) | data] |
+    /// |     etc...                                                          |
+    /// |---------------------------------------------------------------------|
+    /// ```
+    /// If there is a snapshot to write, it will be written and synced to a separate
+    /// file before writing the above WAL frame.
+    ///
+    /// # Errors
+    /// Returns and [`io::Error`] if writing or syncing the data failed.
+    /// on error durability is not garanteed and the caller cannot proceed with the
+    /// [`Ready`] contract, i.e. cannot procede to step 2.
     pub fn persist(&mut self, ready: &Ready) -> io::Result<()> {
         todo!()
     }
