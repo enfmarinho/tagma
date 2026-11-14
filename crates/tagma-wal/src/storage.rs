@@ -15,8 +15,23 @@ pub struct Recovered {
 }
 
 impl<F: Fs> Storage<F> {
-    /// Replays the log from the disk, truncating any torn data left in the tail, possible by a
-    /// crash
+    /// Opens the `fs` storage directory, loads the latest snapshot and replays all the WAL
+    /// segments in order to reconstruct the durable Raft state.
+    ///
+    /// In case the `fs` directoy is empty, it initializes it's state. Otherwise, it performs
+    /// the following operation in order:
+    /// 1. Removed any `.tmp` files from interrupted writes.
+    /// 2. Loads and verify the checksum of the latest snapshot, if there is one.
+    /// 3. Scans all WAL segments in order, verifying its data and applying all frames to the
+    ///    rebuild raft state.
+    /// 4. Truncate any torn writes at the tail of the WAL segments
+    ///
+    /// Returns the initialized Raft WAL and the recovered state machine bytes in order to boot
+    /// the Raft in memory WAL and the KvMachine.
+    ///
+    /// # Errors
+    /// Returns an [`io::Error`] in case any underlying `fs` operations fails or the latest snapshot
+    /// is corrupted or missing.
     pub fn open(fs: F) -> io::Result<(Self, Recovered)> {
         todo!()
     }
