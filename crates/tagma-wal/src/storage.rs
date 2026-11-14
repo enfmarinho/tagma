@@ -1,14 +1,22 @@
+use crate::fs::Fs;
 use std::io;
-
 use tagma_raft::{Ready, Restored};
 
-use crate::fs::Fs;
+/// Filename prefix for segmented WAL files (`LOG_FILE_PREF-{segment_id}.log`)
+pub(crate) const LOG_FILE_PREF: &str = "raft_wal";
 
+/// Filename prefix for state machine snapshots
+pub(crate) const SNAPSHOT_FILE_PREF: &str = "snapshot";
+
+/// Magic number marking the start of a serialized WAL batch frame.
+pub(crate) const WAL_MAGIC: u32 = u32::from_le_bytes(*b"WALM");
+
+/// Persistent storage engine managing the segmented Raft WAL and the snapshot files.
 pub struct Storage<F: Fs> {
     fs: F,
 }
 
-/// Data to rebuild a replica after a restart
+/// Raft state and snapshot payload reconstructed from disk on startup.
 pub struct Recovered {
     pub restored: Restored,
     pub snapshot_data: Option<Vec<u8>>,
