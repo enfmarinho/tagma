@@ -2,10 +2,10 @@ use crate::fs::Fs;
 use std::io;
 use tagma_raft::{Ready, Restored};
 
-/// Filename prefix for segmented WAL files (`LOG_FILE_PREF-{segment_id}.log`)
-pub(crate) const LOG_FILE_PREF: &str = "raft_wal";
+/// Filename prefix for segmented WAL files (`WAL_FILE_PREF-{segment_id}.log`).
+pub(crate) const WAL_FILE_PREF: &str = "wal";
 
-/// Filename prefix for state machine snapshots
+/// Filename prefix for state machine snapshots (`SNAPSHOT_FILE_PREF-{index}-{term}.log`).
 pub(crate) const SNAPSHOT_FILE_PREF: &str = "snapshot";
 
 /// Magic number marking the start of a serialized WAL batch frame.
