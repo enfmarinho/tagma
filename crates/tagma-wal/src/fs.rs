@@ -11,6 +11,8 @@ pub trait Fs {
     fn remove(&mut self, name: &str) -> io::Result<()>;
     fn rename(&mut self, from: &str, to: &str) -> io::Result<()>;
 
+    fn list(&mut self) -> io::Result<Vec<String>>;
+
     fn sync(&mut self, name: &str) -> io::Result<()>;
     fn sync_dir(&mut self) -> io::Result<()>;
 }
