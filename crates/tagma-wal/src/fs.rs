@@ -7,8 +7,9 @@ pub trait Fs {
     fn append(&mut self, name: &str, data: &[u8]) -> io::Result<()>;
     fn truncate(&mut self, name: &str, len: u64) -> io::Result<()>;
 
-    fn rename(&mut self, from: &str, to: &str) -> io::Result<()>;
+    fn create(&mut self, name: &str, size: usize) -> io::Result<()>;
     fn remove(&mut self, name: &str) -> io::Result<()>;
+    fn rename(&mut self, from: &str, to: &str) -> io::Result<()>;
 
     fn sync(&mut self, name: &str) -> io::Result<()>;
     fn sync_dir(&mut self) -> io::Result<()>;
