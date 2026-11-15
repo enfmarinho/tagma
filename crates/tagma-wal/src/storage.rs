@@ -1,6 +1,6 @@
 use crate::fs::Fs;
 use std::io;
-use tagma_raft::{Ready, Restored};
+use tagma_raft::{LogIndex, Ready, Restored, Snapshot, Term};
 
 /// Filename prefix for segmented WAL files (`WAL_FILE_PREF-{segment_id}.log`).
 pub(crate) const WAL_FILE_PREF: &str = "wal";
@@ -11,6 +11,9 @@ pub(crate) const SNAPSHOT_FILE_PREF: &str = "snapshot";
 /// Magic number marking the start of a serialized WAL batch frame.
 pub(crate) const WAL_MAGIC: u32 = u32::from_le_bytes(*b"WALM");
 
+/// WAL Segment size in MB.
+pub(crate) const SEGMENT_SIZE: usize = 64 * 1024 * 1024;
+
 /// Persistent storage engine managing the segmented Raft WAL and the snapshot files.
 pub struct Storage<F: Fs> {
     fs: F,
@@ -20,6 +23,11 @@ pub struct Storage<F: Fs> {
 pub struct Recovered {
     pub restored: Restored,
     pub snapshot_data: Option<Vec<u8>>,
+}
+
+struct DirInventory {
+    segments: Vec<(u64, String)>,             // (id, filename)
+    snapshots: Vec<(LogIndex, Term, String)>, // (index, term, filename)
 }
 
 impl<F: Fs> Storage<F> {
@@ -40,8 +48,76 @@ impl<F: Fs> Storage<F> {
     /// # Errors
     /// Returns an [`io::Error`] in case any underlying `fs` operations fails or the latest snapshot
     /// is corrupted or missing.
-    pub fn open(fs: F) -> io::Result<(Self, Recovered)> {
+    pub fn open(mut fs: F) -> io::Result<(Self, Recovered)> {
+        let inv = Self::scan_dir(&mut fs)?;
+
+        if inv.segments.is_empty() && inv.snapshots.is_empty() {
+            Self::init_fs(&mut fs)?;
+            // return empty
+        }
+
         todo!()
+    }
+
+    fn scan_dir(fs: &mut F) -> io::Result<DirInventory> {
+        let mut inv = DirInventory {
+            segments: Vec::new(),
+            snapshots: Vec::new(),
+        };
+        let mut deleted = false;
+
+        for name in fs.list()? {
+            if let Some(id) = Self::parse_wal_filename(&name) {
+                inv.segments.push((id, name));
+            } else if let Some((index, term)) = Self::parse_snapshot_filename(&name) {
+                inv.snapshots.push((index, term, name));
+            } else {
+                // `.tmp` files or any unrecognized file
+                fs.remove(&name)?;
+                deleted = true;
+            }
+        }
+
+        if deleted {
+            fs.sync_dir()?;
+        }
+
+        // sort so segment and snapshot files are in order, newest at the end.
+        inv.segments.sort_by_key(|(idx, _)| *idx);
+        inv.snapshots.sort_by_key(|(idx, term, _)| (*idx, *term));
+
+        Ok(inv)
+    }
+
+    fn init_fs(fs: &mut F) -> io::Result<()> {
+        fs.create(&Self::wal_filename(1), SEGMENT_SIZE)?;
+        fs.sync_dir()?;
+        Ok(())
+    }
+
+    fn wal_filename(id: u64) -> String {
+        WAL_FILE_PREF.to_string() + "-" + &id.to_string() + ".log"
+    }
+
+    fn snapshot_filename(index: LogIndex, term: Term) -> String {
+        SNAPSHOT_FILE_PREF.to_string() + "-" + &index.to_string() + "-" + &term.to_string + ".log"
+    }
+
+    fn parse_wal_filename(filename: &String) -> Option<u64> {
+        filename
+            .strip_prefix(WAL_FILE_PREF)?
+            .strip_suffix(".log")?
+            .parse()
+            .ok()
+    }
+
+    fn parse_snapshot_filename(filename: &String) -> Option<(LogIndex, Term)> {
+        let (index, term) = filename
+            .strip_prefix(SNAPSHOT_FILE_PREF)?
+            .strip_suffix(".log")?
+            .split_once("-")?;
+
+        Some((index.parse().ok()?, term.parse().ok()?))
     }
 
     /// Step 1 of the [`Ready`] contract. Persist the durable state to disk.
@@ -75,6 +151,14 @@ impl<F: Fs> Storage<F> {
     /// on error durability is not garanteed and the caller cannot proceed with the
     /// [`Ready`] contract, i.e. cannot procede to step 2.
     pub fn persist(&mut self, ready: &Ready) -> io::Result<()> {
+        if let Some(snapshot) = &ready.snapshot {
+            Self::persist_snapshot(&snapshot)?;
+        }
+
+        todo!()
+    }
+
+    fn persist_snapshot(snapshot: &Snapshot) -> io::Result<()> {
         todo!()
     }
 }
