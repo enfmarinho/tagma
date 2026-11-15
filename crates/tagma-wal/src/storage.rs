@@ -26,7 +26,7 @@ impl<F: Fs> Storage<F> {
     /// Opens the `fs` storage directory, loads the latest snapshot and replays all the WAL
     /// segments in order to reconstruct the durable Raft state.
     ///
-    /// In case the `fs` directoy is empty, it initializes it's state. Otherwise, it performs
+    /// In case the `fs` directory is empty, it initializes it's state. Otherwise, it performs
     /// the following operation in order:
     /// 1. Removed any `.tmp` files from interrupted writes.
     /// 2. Loads and verify the checksum of the latest snapshot, if there is one.
