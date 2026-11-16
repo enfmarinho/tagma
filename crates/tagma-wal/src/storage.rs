@@ -9,7 +9,7 @@ pub(crate) const WAL_FILE_PREF: &str = "wal";
 pub(crate) const SNAPSHOT_FILE_PREF: &str = "snapshot";
 
 /// Magic number marking the start of a serialized WAL batch frame.
-pub(crate) const WAL_MAGIC: u32 = u32::from_le_bytes(*b"WALM");
+pub(crate) const WAL_MAGIC: u32 = u32::from_le_bytes(*b"TGM\x01");
 
 /// WAL Segment size in MB.
 pub(crate) const SEGMENT_SIZE: usize = 64 * 1024 * 1024;
