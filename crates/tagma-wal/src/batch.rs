@@ -35,19 +35,30 @@ impl WalFrameHeader {
 
 /// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
 #[derive(Serialize)]
-struct Batch<'a> {
+pub(crate) struct Batch<'a> {
     pub hard_state: Option<HardState>,
     pub truncate_from: Option<LogIndex>,
-    pub snapshot: Option<(LogIndex, Term)>,
+    pub snapshot: Option<SnapshotMeta>,
     pub entries: &'a [Entry],
+}
+
+impl<'a> Batch<'a> {
+    pub(crate) fn new(ready: &'a Ready) -> Self {
+        Self {
+            hard_state: ready.hard_state,
+            truncate_from: ready.truncate_from,
+            snapshot: ready.snapshot.as_ref().map(|s| s.meta.clone()),
+            entries: &ready.entries,
+        }
+    }
 }
 
 /// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
 #[derive(Deserialize)]
-struct OwnedBatch {
+pub(crate) struct OwnedBatch {
     pub hard_state: Option<HardState>,
     pub truncate_from: Option<LogIndex>,
-    pub snapshot: Option<(LogIndex, Term)>,
+    pub snapshot_meta: Option<SnapshotMeta>,
     pub entries: Vec<Entry>,
 }
 
