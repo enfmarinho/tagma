@@ -1,7 +1,37 @@
 use std::io;
 
 use serde::{Deserialize, Serialize};
-use tagma_raft::{Entry, HardState, LogIndex, Term};
+use tagma_raft::{Entry, HardState, LogIndex, Ready, SnapshotMeta, Term};
+
+use crate::storage;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WalFrameHeader {
+    magic: u32,
+    len: u32,
+    crc: u32,
+}
+
+impl WalFrameHeader {
+    pub(crate) const LEN: usize = std::mem::size_of::<Self>();
+
+    pub(crate) fn new(len: u32, crc: u32) -> Self {
+        Self {
+            magic: storage::WAL_MAGIC,
+            len,
+            crc,
+        }
+    }
+
+    pub(crate) fn to_bytes(self) -> [u8; Self::LEN] {
+        unsafe { std::mem::transmute(self) }
+    }
+
+    pub(crate) fn from_bytes(bytes: [u8; Self::LEN]) -> Self {
+        unsafe { std::mem::transmute(bytes) }
+    }
+}
 
 /// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
 #[derive(Serialize)]
