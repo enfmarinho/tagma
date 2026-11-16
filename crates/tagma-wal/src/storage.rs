@@ -174,7 +174,7 @@ impl<F: Fs> Storage<F> {
         Self::snapshot_filename(meta) + ".tmp"
     }
 
-    fn parse_segment_filename(filename: &String) -> Option<u64> {
+    fn parse_segment_filename(filename: &str) -> Option<u64> {
         filename
             .strip_prefix(WAL_FILE_PREF)?
             .strip_suffix(".log")?
@@ -182,7 +182,7 @@ impl<F: Fs> Storage<F> {
             .ok()
     }
 
-    fn parse_snapshot_filename(filename: &String) -> Option<(LogIndex, Term)> {
+    fn parse_snapshot_filename(filename: &str) -> Option<(LogIndex, Term)> {
         let (index, term) = filename
             .strip_prefix(SNAPSHOT_FILE_PREF)?
             .strip_suffix(".log")?
