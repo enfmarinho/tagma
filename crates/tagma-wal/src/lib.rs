@@ -1,3 +1,3 @@
-mod batch;
+mod frame;
 mod fs;
 mod storage;
