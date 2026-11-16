@@ -7,7 +7,7 @@ use std::{
     collections::VecDeque,
     io::{self, Error},
 };
-use tagma_raft::{LogIndex, Ready, Restored, Snapshot, SnapshotMeta, Term};
+use tagma_raft::{HardState, LogIndex, Ready, Restored, Snapshot, SnapshotMeta, Term};
 
 /// Filename prefix for segmented WAL files (`WAL_FILE_PREF-{segment_id}.log`).
 pub(crate) const WAL_FILE_PREF: &str = "wal";
@@ -84,7 +84,28 @@ impl<F: Fs> Storage<F> {
 
         if inv.segments.is_empty() && inv.snapshots.is_empty() {
             Self::init_fs(&mut fs)?;
-            // return empty
+            return Ok((
+                Self {
+                    fs,
+                    active_segment_id: 1,
+                    active_segment_offset: 0,
+                    active_segment_max_index: 0,
+                    latest_snapshot_index: 0,
+                    sealed_segments: VecDeque::new(),
+                    scratch_buf: Vec::new(),
+                },
+                Recovered {
+                    restored: Restored {
+                        hard_state: HardState {
+                            term: 0,
+                            voted_for: None,
+                        },
+                        snapshot: None,
+                        entries: Vec::new(),
+                    },
+                    snapshot_data: None,
+                },
+            ));
         }
 
         // check for a missing segment pair
