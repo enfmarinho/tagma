@@ -90,6 +90,41 @@ pub(crate) struct OwnedBatch {
     pub entries: Vec<Entry>,
 }
 
+struct Cursor<'a> {
+    buf: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(buf: &'a [u8]) -> Self {
+        Self { buf, offset: 0 }
+    }
+
+    fn advance(&mut self, n: usize) {
+        self.offset += n;
+    }
+
+    fn remaining(&self) -> usize {
+        self.buf.len() - self.offset
+    }
+
+    fn read_bytes(&mut self, n: usize) -> Option<&'a [u8]> {
+        let bytes = self.buf.get(self.offset..self.offset + n);
+        self.offset += n;
+        bytes
+    }
+
+    fn read_u8(&mut self) -> Option<u8> {
+        Some(self.read_bytes(1)?[0])
+    }
+    fn read_u32(&mut self) -> Option<u32> {
+        Some(u32::from_le_bytes(self.read_bytes(4)?.try_into().unwrap()))
+    }
+    fn read_u64(&mut self) -> Option<u64> {
+        Some(u64::from_le_bytes(self.read_bytes(8)?.try_into().unwrap()))
+    }
+}
+
 /// Encode a [`Batch`] and writes it to the `out` buffer.
 pub(crate) fn encode(batch: &Batch<'_>, out: &mut [u8]) {
     todo!()
