@@ -7,7 +7,7 @@ use std::{
     collections::VecDeque,
     io::{self, Error},
 };
-use tagma_raft::{HardState, LogIndex, Ready, Restored, Snapshot, SnapshotMeta, Term};
+use tagma_raft::{HardState, LogIndex, Ready, Restored, Snapshot, SnapshotMeta};
 
 /// Filename prefix for segmented WAL files (`WAL_FILE_PREF-{segment_id}.log`).
 pub(crate) const WAL_FILE_PREF: &str = "wal";
@@ -41,7 +41,7 @@ pub struct Storage<F: Fs> {
     active_segment_max_index: LogIndex,
 
     /// Index when the latest snapshot was taken.
-    latest_snapshot_index: LogIndex,
+    latest_snapshot_meta: SnapshotMeta,
 
     /// Sealed segments metadata.
     sealed_segments: VecDeque<SealedSegment>,
@@ -57,11 +57,42 @@ pub struct Recovered {
 }
 
 struct DirInventory {
-    segments: Vec<(u64, String)>,             // (id, filename)
-    snapshots: Vec<(LogIndex, Term, String)>, // (index, term, filename)
+    segments: Vec<(u64, String)>,           // (id, filename)
+    snapshots: Vec<(SnapshotMeta, String)>, // (meta, filename)
 }
 
 impl<F: Fs> Storage<F> {
+    fn scan_dir(fs: &mut F) -> io::Result<DirInventory> {
+        let mut inv = DirInventory {
+            segments: Vec::new(),
+            snapshots: Vec::new(),
+        };
+        let mut deleted = false;
+
+        for name in fs.list()? {
+            if let Some(id) = Self::parse_segment_filename(&name) {
+                inv.segments.push((id, name));
+            } else if let Some(meta) = Self::parse_snapshot_filename(&name) {
+                inv.snapshots.push((meta, name));
+            } else {
+                // `.tmp` files or any unrecognized file
+                fs.remove(&name)?;
+                deleted = true;
+            }
+        }
+
+        if deleted {
+            fs.sync_dir()?;
+        }
+
+        // sort so segment and snapshot files are in order, newest at the end.
+        inv.segments.sort_by_key(|(idx, _)| *idx);
+        inv.snapshots
+            .sort_by_key(|(meta, _)| (meta.last_index, meta.last_term));
+
+        Ok(inv)
+    }
+
     /// Opens the `fs` storage directory, loads the latest snapshot and replays all the WAL
     /// segments in order to reconstruct the durable Raft state.
     ///
@@ -90,7 +121,10 @@ impl<F: Fs> Storage<F> {
                     active_segment_id: 1,
                     active_segment_offset: 0,
                     active_segment_max_index: 0,
-                    latest_snapshot_index: 0,
+                    latest_snapshot_meta: SnapshotMeta {
+                        last_index: 0,
+                        last_term: 0,
+                    },
                     sealed_segments: VecDeque::new(),
                     scratch_buf: Vec::new(),
                 },
@@ -108,40 +142,27 @@ impl<F: Fs> Storage<F> {
             ));
         }
 
-        // check for a missing segment pair
-        // replay segments in order
+        Self::check_for_missing_segment(&mut fs, &inv)?;
 
-        todo!()
-    }
-
-    fn scan_dir(fs: &mut F) -> io::Result<DirInventory> {
-        let mut inv = DirInventory {
-            segments: Vec::new(),
-            snapshots: Vec::new(),
-        };
+        let snapshot = Self::load_snapshot(&mut fs, &inv)?;
+        // Delete all snapshots older than the one used
         let mut deleted = false;
-
-        for name in fs.list()? {
-            if let Some(id) = Self::parse_segment_filename(&name) {
-                inv.segments.push((id, name));
-            } else if let Some((index, term)) = Self::parse_snapshot_filename(&name) {
-                inv.snapshots.push((index, term, name));
-            } else {
-                // `.tmp` files or any unrecognized file
-                fs.remove(&name)?;
+        for (meta, filename) in inv.snapshots {
+            if meta.last_index < snapshot.meta.last_index {
+                fs.remove(&filename)?;
                 deleted = true;
             }
         }
-
         if deleted {
             fs.sync_dir()?;
         }
 
-        // sort so segment and snapshot files are in order, newest at the end.
-        inv.segments.sort_by_key(|(idx, _)| *idx);
-        inv.snapshots.sort_by_key(|(idx, term, _)| (*idx, *term));
+        // TODO: replay segments entries
 
-        Ok(inv)
+        if inv.segments.is_empty() { // all segments were compacted after a snapshot
+        }
+
+        todo!()
     }
 
     fn init_fs(fs: &mut F) -> io::Result<()> {
@@ -182,13 +203,85 @@ impl<F: Fs> Storage<F> {
             .ok()
     }
 
-    fn parse_snapshot_filename(filename: &str) -> Option<(LogIndex, Term)> {
+    fn parse_snapshot_filename(filename: &str) -> Option<SnapshotMeta> {
         let (index, term) = filename
             .strip_prefix(SNAPSHOT_FILE_PREF)?
             .strip_suffix(".log")?
             .split_once("-")?;
 
-        Some((index.parse().ok()?, term.parse().ok()?))
+        Some(SnapshotMeta {
+            last_index: index.parse().ok()?,
+            last_term: term.parse().ok()?,
+        })
+    }
+
+    fn check_for_missing_segment(fs: &mut F, inv: &DirInventory) -> io::Result<()> {
+        // TODO improve, this is to strict and may invalidate valid conditions
+        for pair in inv.segments.windows(2) {
+            if pair[1].0 != pair[0].0 + 1 {
+                return Err(Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "missing WAL segments between {} and {}",
+                        pair[0].0, pair[1].0
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn load_snapshot(fs: &mut F, inv: &DirInventory) -> io::Result<Snapshot> {
+        let empty_snapshot = Snapshot {
+            meta: SnapshotMeta {
+                last_index: 0,
+                last_term: 0,
+            },
+            data: Vec::new(),
+        };
+
+        let Some((meta, filename)) = inv.snapshots.last() else {
+            return Ok(empty_snapshot);
+        };
+
+        let filename = Self::snapshot_filename_log(*meta);
+        let snapshot_frame_data = fs.read(&filename)?;
+        let Some(mut snapshot_frame_data) = snapshot_frame_data else {
+            return Ok(empty_snapshot);
+        };
+
+        let (frame_header_bytes, _) = snapshot_frame_data.split_at(SnapshotFrameHeader::LEN);
+
+        let frame_header_bytes = frame_header_bytes
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid snapshot."))?;
+
+        let snapshot_header = SnapshotFrameHeader::from_bytes(frame_header_bytes);
+
+        snapshot_frame_data.copy_within(SnapshotFrameHeader::LEN.., 0);
+        snapshot_frame_data.truncate(snapshot_frame_data.len() - SnapshotFrameHeader::LEN);
+
+        let snapshot_bytes = snapshot_frame_data;
+
+        let crc = crc32fast::hash(&snapshot_bytes);
+
+        if crc != snapshot_header.crc {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid snapshot: CRC key does not match.",
+            ));
+        }
+        if snapshot_bytes.len() != snapshot_header.len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid snapshot: file lenght does not match expected `len`.",
+            ));
+        }
+
+        Ok(Snapshot {
+            meta: *meta,
+            data: snapshot_bytes,
+        })
     }
 
     /// Step 1 of the [`Ready`] contract. Persist the durable state to disk.
