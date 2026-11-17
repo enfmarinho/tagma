@@ -305,7 +305,12 @@ impl<F: Fs> Storage<F> {
             .rename(snapshot_filename_tmp, snapshot_filename_log)?;
         self.fs.sync_dir()?;
 
-        self.latest_snapshot_index = snapshot.meta.last_index;
+        let old_snapshot_meta = self.latest_snapshot_meta;
+        self.latest_snapshot_meta = snapshot.meta;
+
+        let old_snapshot_filename = Self::snapshot_filename_log(old_snapshot_meta);
+        self.fs.remove(&old_snapshot_filename)?;
+        self.fs.sync_dir()?;
 
         Ok(())
     }
