@@ -7,34 +7,6 @@ use crate::storage;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct WalFrameHeader {
-    magic: u32,
-    len: u32,
-    crc: u32,
-}
-
-impl WalFrameHeader {
-    pub(crate) const LEN: usize = std::mem::size_of::<Self>();
-
-    pub(crate) fn new(len: u32, crc: u32) -> Self {
-        Self {
-            magic: storage::WAL_MAGIC,
-            len,
-            crc,
-        }
-    }
-
-    pub(crate) fn to_bytes(self) -> [u8; Self::LEN] {
-        unsafe { std::mem::transmute(self) }
-    }
-
-    pub(crate) fn from_bytes(bytes: [u8; Self::LEN]) -> Self {
-        unsafe { std::mem::transmute(bytes) }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SnapshotFrameHeader {
     pub len: usize,
     pub crc: u32,
@@ -58,6 +30,34 @@ impl SnapshotFrameHeader {
 
     pub(crate) fn from_bytes(bytes: &[u8; Self::LEN]) -> Self {
         unsafe { std::mem::transmute(*bytes) }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WalFrameHeader {
+    magic: u32,
+    len: u32,
+    crc: u32,
+}
+
+impl WalFrameHeader {
+    pub(crate) const LEN: usize = std::mem::size_of::<Self>();
+
+    pub(crate) fn new(len: u32, crc: u32) -> Self {
+        Self {
+            magic: storage::WAL_MAGIC,
+            len,
+            crc,
+        }
+    }
+
+    pub(crate) fn to_bytes(self) -> [u8; Self::LEN] {
+        unsafe { std::mem::transmute(self) }
+    }
+
+    pub(crate) fn from_bytes(bytes: [u8; Self::LEN]) -> Self {
+        unsafe { std::mem::transmute(bytes) }
     }
 }
 
