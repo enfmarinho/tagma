@@ -36,9 +36,9 @@ impl WalFrameHeader {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SnapshotFrameHeader {
-    len: usize,
-    crc: u32,
-    padding: u32,
+    pub len: usize,
+    pub crc: u32,
+    pub padding: u32,
 }
 
 impl SnapshotFrameHeader {
@@ -56,8 +56,8 @@ impl SnapshotFrameHeader {
         unsafe { std::mem::transmute(self) }
     }
 
-    pub(crate) fn from_bytes(bytes: [u8; Self::LEN]) -> Self {
-        unsafe { std::mem::transmute(bytes) }
+    pub(crate) fn from_bytes(bytes: &[u8; Self::LEN]) -> Self {
+        unsafe { std::mem::transmute(*bytes) }
     }
 }
 
