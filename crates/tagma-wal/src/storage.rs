@@ -223,17 +223,16 @@ impl<F: Fs> Storage<F> {
     /// [`Ready`] contract, i.e. cannot procede to step 2.
     pub fn persist(&mut self, ready: &Ready) -> io::Result<()> {
         if let Some(snapshot) = &ready.snapshot {
-            self.persist_snapshot(&snapshot)?;
+            self.persist_snapshot(snapshot)?;
         }
 
         self.scratch_buf.clear();
         self.scratch_buf.resize(WalFrameHeader::LEN, 0);
 
-        let batch = Batch::new(&ready);
+        let batch = Batch::new(ready);
         frame::encode(&batch, &mut self.scratch_buf);
 
-        let payload_len = usize::try_from(self.scratch_buf[WalFrameHeader::LEN..].len())
-            .map_err(|_| io::ErrorKind::InvalidInput)?;
+        let payload_len = self.scratch_buf[WalFrameHeader::LEN..].len();
 
         if payload_len > SEGMENT_SIZE {
             // this is an unrealistic control path, considering the unlikelihood of the
@@ -255,7 +254,7 @@ impl<F: Fs> Storage<F> {
         let payload = &self.scratch_buf[WalFrameHeader::LEN..];
 
         // Safety: this cast to u32 is safe since payload_len is smaller than SEGMENT_SIZE
-        let frame_header = WalFrameHeader::new(payload_len as u32, crc32fast::hash(&payload));
+        let frame_header = WalFrameHeader::new(payload_len as u32, crc32fast::hash(payload));
 
         self.scratch_buf[..WalFrameHeader::LEN].copy_from_slice(&frame_header.to_bytes());
 
@@ -263,7 +262,7 @@ impl<F: Fs> Storage<F> {
         let segment_filename_tmp = &(segment_filename.clone() + ".tmp");
         let segment_filename_log = &(segment_filename.clone() + ".log");
 
-        self.fs.write(&segment_filename_tmp, &self.scratch_buf)?;
+        self.fs.write(segment_filename_tmp, &self.scratch_buf)?;
         self.fs.sync(segment_filename_tmp)?;
 
         self.fs.rename(segment_filename_tmp, segment_filename_log)?;

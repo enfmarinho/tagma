@@ -1,7 +1,7 @@
 use std::io;
 
 use serde::{Deserialize, Serialize};
-use tagma_raft::{Entry, HardState, LogIndex, Ready, SnapshotMeta, Term};
+use tagma_raft::{Entry, HardState, LogIndex, Ready, SnapshotMeta};
 
 use crate::storage;
 
@@ -75,7 +75,7 @@ impl<'a> Batch<'a> {
         Self {
             hard_state: ready.hard_state,
             truncate_from: ready.truncate_from,
-            snapshot: ready.snapshot.as_ref().map(|s| s.meta.clone()),
+            snapshot: ready.snapshot.as_ref().map(|s| s.meta),
             entries: &ready.entries,
         }
     }
@@ -91,7 +91,7 @@ pub(crate) struct OwnedBatch {
 }
 
 /// Encode a [`Batch`] and writes it to the `out` buffer.
-pub(crate) fn encode(batch: &Batch<'_>, out: &mut Vec<u8>) {
+pub(crate) fn encode(batch: &Batch<'_>, out: &mut [u8]) {
     todo!()
 }
 
