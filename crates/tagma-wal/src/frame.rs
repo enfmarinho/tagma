@@ -129,6 +129,46 @@ impl<'a> ReadCursor<'a> {
     }
 }
 
+struct WriteCursor<'a> {
+    buf: &'a mut [u8],
+    offset: usize,
+}
+
+impl<'a> WriteCursor<'a> {
+    fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, offset: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.buf.len() - self.offset
+    }
+
+    fn write_bytes(&mut self, src: &[u8]) {
+        let end = self.offset + src.len();
+        self.buf[self.offset..end].copy_from_slice(src);
+        self.offset = end;
+    }
+
+    fn write_zeros(&mut self, n: usize) {
+        let end = self.offset + n;
+        self.buf[self.offset..end].fill(0);
+        self.offset = end;
+    }
+
+    fn write_u8(&mut self, v: u8) {
+        self.buf[self.offset] = v;
+        self.offset += 1;
+    }
+
+    fn write_u32(&mut self, v: u32) {
+        self.write_bytes(&v.to_le_bytes());
+    }
+
+    fn write_u64(&mut self, v: u64) {
+        self.write_bytes(&v.to_le_bytes());
+    }
+}
+
 /// Encode a [`Batch`] and writes it to the `out` buffer.
 pub(crate) fn encode(batch: &Batch<'_>, out: &mut [u8]) {
     todo!()
