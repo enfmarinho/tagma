@@ -47,12 +47,6 @@ impl WalFrame {
     }
 }
 
-/// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
-struct WalBatch<E = Vec<Entry>> {
-    batch_header: BatchHeader,
-    entries_record: EntryRecord<E>,
-}
-
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct WalFrameHeader {
@@ -80,6 +74,13 @@ impl WalFrameHeader {
         unsafe { std::mem::transmute(*bytes) }
     }
 }
+
+/// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
+struct WalBatch<E = Vec<Entry>> {
+    batch_header: BatchHeader,
+    entries_record: EntryRecord<E>,
+}
+
 
 pub(crate) struct BatchHeader {
     pub hard_state: Option<HardState>,
