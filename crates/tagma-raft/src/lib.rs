@@ -1,5 +1,3 @@
-#![expect(unused_variables)]
-
 mod config;
 mod election;
 mod log;

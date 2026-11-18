@@ -144,7 +144,7 @@ impl Raft {
     }
 
     pub fn broadcast_append(&mut self) {
-        let Role::Leader { progress } = &mut self.role else {
+        let Role::Leader { progress: _ } = &mut self.role else {
             unreachable!("Trying to broadcast append but is not leader");
         };
 
