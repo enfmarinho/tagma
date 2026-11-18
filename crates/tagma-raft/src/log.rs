@@ -67,6 +67,7 @@ impl RaftLog {
         &self.entries[start..end]
     }
 
+    #[cfg(test)]
     pub(crate) fn truncate_from(&mut self, index: LogIndex) {
         debug_assert!(
             index > self.offset(),
