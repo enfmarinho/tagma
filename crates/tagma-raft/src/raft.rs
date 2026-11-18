@@ -113,7 +113,7 @@ impl Raft {
     }
 
     /// Registers a linearisable read request for `id`.
-    pub fn read_index(&mut self, id: ReadId) -> Result<(), NotLeader> {
+    pub fn read_index(&mut self, _id: ReadId) -> Result<(), NotLeader> {
         todo!()
     }
 
