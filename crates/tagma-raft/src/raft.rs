@@ -12,16 +12,16 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Raft {
-    pub config: Config,
-    pub rng: Rng,
-    pub hard_state: HardState,
-    pub log: RaftLog,
-    pub role: Role,
-    pub commit_index: LogIndex,
-    pub election_elapsed: u64,
-    pub election_timeout: u64,
-    pub heartbeat_elapsed: u64,
-    pub ready: Ready,
+    pub(crate) config: Config,
+    pub(crate) rng: Rng,
+    pub(crate) hard_state: HardState,
+    pub(crate) log: RaftLog,
+    pub(crate) role: Role,
+    pub(crate) commit_index: LogIndex,
+    pub(crate) election_elapsed: u64,
+    pub(crate) election_timeout: u64,
+    pub(crate) heartbeat_elapsed: u64,
+    pub(crate) ready: Ready,
 }
 
 impl Raft {
