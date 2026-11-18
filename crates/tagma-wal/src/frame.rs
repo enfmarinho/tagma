@@ -92,22 +92,22 @@ pub(crate) struct OwnedBatch {
     pub entries: Vec<Entry>,
 }
 
-struct Cursor<'a> {
+struct ReadCursor<'a> {
     buf: &'a [u8],
     offset: usize,
 }
 
-impl<'a> Cursor<'a> {
+impl<'a> ReadCursor<'a> {
     fn new(buf: &'a [u8]) -> Self {
         Self { buf, offset: 0 }
     }
 
-    fn advance(&mut self, n: usize) {
-        self.offset += n;
-    }
-
     fn remaining(&self) -> usize {
         self.buf.len() - self.offset
+    }
+
+    fn advance(&mut self, n: usize) {
+        self.offset += n;
     }
 
     fn read_bytes(&mut self, n: usize) -> Option<&'a [u8]> {
@@ -119,9 +119,11 @@ impl<'a> Cursor<'a> {
     fn read_u8(&mut self) -> Option<u8> {
         Some(self.read_bytes(1)?[0])
     }
+
     fn read_u32(&mut self) -> Option<u32> {
         Some(u32::from_le_bytes(self.read_bytes(4)?.try_into().unwrap()))
     }
+
     fn read_u64(&mut self) -> Option<u64> {
         Some(u64::from_le_bytes(self.read_bytes(8)?.try_into().unwrap()))
     }
@@ -187,7 +189,7 @@ pub(crate) fn decode(buf: &[u8]) -> io::Result<(Vec<OwnedBatch>, usize, bool)> {
 }
 
 fn decode_batch(buf: &[u8]) -> Option<OwnedBatch> {
-    let mut c = Cursor::new(buf);
+    let mut c = ReadCursor::new(buf);
 
     let hard_state = match c.read_u8()? {
         0 => {
