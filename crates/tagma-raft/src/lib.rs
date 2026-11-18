@@ -22,6 +22,6 @@ pub use raft::Raft;
 pub use ready::Ready;
 pub use rng::Rng;
 pub use types::{
-    Entry, HardState, LogIndex, NodeId, NotLeader, Payload, ReadId, ReadReady, Restored, Snapshot,
-    SnapshotMeta, Term,
+    Entry, HardState, LogIndex, NodeId, NotLeader, PAYLOAD_COMMAND, PAYLOAD_NOOP, Payload, ReadId,
+    ReadReady, Restored, Snapshot, SnapshotMeta, Term,
 };

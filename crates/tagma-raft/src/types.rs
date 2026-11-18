@@ -24,6 +24,8 @@ pub enum Payload {
     Noop, // leader change
     Command(Vec<u8>),
 }
+pub const PAYLOAD_NOOP: u8 = 0;
+pub const PAYLOAD_COMMAND: u8 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
