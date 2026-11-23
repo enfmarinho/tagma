@@ -23,16 +23,16 @@ impl WalFrame {
     /// Encode a [`Batch`] and writes it to the `out` buffer.
     ///
     /// |--------------------------------------------------------------------------|
-    /// | Magic (4B)    | Length (4B)    | CRC32 (4B)                              |
+    /// | Magic (4b)    | Length (4b)    | CRC32 (4b)                              |
     /// |--------------------------------------------------------------------------|
     /// | Batch Header:                                                            |
-    /// |     has_hard_state (1B) | term(8B) | has_voted_for (1B) | voted_for (u8) |
-    /// |     has_truncate (1B)   | truncate_from (8B)                             |  
-    /// |     has_snapshot (1B)   | snap_index (8B)     | snap_term (8B)           |
+    /// |     has_hard_state (1b) | term(8b) | has_voted_for (1b) | voted_for (8b) |
+    /// |     has_truncate (1b)   | truncate_from (8b)                             |  
+    /// |     has_snapshot (1b)   | snap_index (8b)     | snap_term (8b)           |
     /// |     entry_count(8b)                                                      |
     /// |--------------------------------------------------------------------      |
     /// | entries payload:                                                         |
-    /// |     [entry 0: index (8b) | term (8b) | type (1b) | len (4b) | data]      |
+    /// |     [entry 0: index (8b) | term (8b) | type (1b) | len (4b) | data       |
     /// |     etc...                                                               |
     /// |--------------------------------------------------------------------------|
     pub(crate) fn encode<E: AsRef<[Entry]>>(
@@ -78,9 +78,8 @@ impl WalFrameHeader {
 /// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
 struct WalBatch<E = Vec<Entry>> {
     batch_header: BatchHeader,
-    entries_record: EntryRecord<E>,
+    entries: E,
 }
-
 
 pub(crate) struct BatchHeader {
     pub hard_state: Option<HardState>,
@@ -90,7 +89,7 @@ pub(crate) struct BatchHeader {
 }
 
 impl BatchHeader {
-    const LEN: usize = todo!();
+    const LEN: usize = 18 + 9 + 17 + 8;
 
     fn new(ready: &Ready) -> Self {
         Self {
@@ -101,60 +100,149 @@ impl BatchHeader {
         }
     }
 
-    fn decode(c: ReadCursor) -> Option<Self> {
-        todo!()
+    fn decode(r: &mut ReadCursor) -> Option<Self> {
+        let hard_state = match r.read_u8()? {
+            0 => {
+                r.advance(24);
+                None
+            }
+            1 => {
+                let term = r.read_u64()?;
+                let voted_for = r.read_u64();
+                Some(HardState { term, voted_for })
+            }
+            _ => return None,
+        };
+
+        let truncate_from: Option<LogIndex> = match r.read_u8()? {
+            0 => {
+                r.advance(8);
+                None
+            }
+            1 => {
+                let truncate_from = r.read_u64()?;
+                Some(truncate_from)
+            }
+            _ => return None,
+        };
+
+        let meta = match r.read_u8()? {
+            0 => {
+                r.advance(16);
+                None
+            }
+            1 => {
+                let last_index = r.read_u64()?;
+                let last_term = r.read_u64()?;
+                Some(SnapshotMeta {
+                    last_index,
+                    last_term,
+                })
+            }
+            _ => return None,
+        };
+
+        let entry_count = r.read_u64()?;
+
+        Some(Self {
+            hard_state,
+            truncate_from,
+            meta,
+            entry_count,
+        })
     }
 
-    fn encode(&self, c: &mut WriteCursor) {
-        todo!()
+    fn encode(&self, w: &mut WriteCursor) {
+        match self.hard_state {
+            Some(hs) => {
+                w.write_u8(1);
+                w.write_u64(hs.term);
+                match hs.voted_for {
+                    Some(voted_for) => {
+                        w.write_u8(1);
+                        w.write_u64(voted_for);
+                    }
+                    None => w.write_zeros(9),
+                }
+            }
+            None => w.write_zeros(18),
+        }
+
+        match self.truncate_from {
+            Some(truncate_from) => {
+                w.write_u8(1);
+                w.write_u64(truncate_from);
+            }
+            None => w.write_zeros(9),
+        }
+
+        match self.meta {
+            Some(meta) => {
+                w.write_u8(1);
+                w.write_u64(meta.last_index);
+                w.write_u64(meta.last_term);
+            }
+            None => w.write_zeros(17),
+        }
+
+        w.write_u64(self.entry_count);
     }
 }
 
-pub(crate) struct EntryRecord<E = Vec<Entry>> {
-    records: E,
+pub(crate) struct EntryRecord<'a> {
+    entry: &'a Entry,
 }
 
-impl EntryRecord {
-    fn new(ready: &Ready) -> Self {
-        todo!()
+impl<'a> EntryRecord<'a> {
+    const LEN: usize = 8 + 8 + 1 + 4;
+
+    fn new(entry: &'a Entry) -> Self {
+        Self { entry }
     }
 
-    fn decode(c: ReadCursor) -> Option<Self> {
-        todo!()
+    fn decode(r: &mut ReadCursor) -> Option<Entry> {
+        let index = r.read_u64()?;
+        let term = r.read_u64()?;
+        let payload_type = r.read_u8()?;
+        let len = r.read_u32()? as usize;
+
+        let payload = match payload_type {
+            PAYLOAD_NOOP => {
+                if len != 0 {
+                    return None;
+                }
+                Payload::Noop
+            }
+            PAYLOAD_COMMAND => {
+                let data = r.read_bytes(len)?.to_vec();
+                Payload::Command(data)
+            }
+            _ => return None,
+        };
+
+        Some(Entry {
+            term,
+            index,
+            payload,
+        })
     }
 
-    fn encode(&self, c: &mut WriteCursor) {
-        todo!()
+    fn encode(&self, w: &mut WriteCursor) {
+        w.write_u64(self.entry.index);
+        w.write_u64(self.entry.term);
+        match &self.entry.payload {
+            Payload::Noop => {
+                w.write_u8(PAYLOAD_NOOP);
+                w.write_u64(0);
+            }
+            Payload::Command(data) => {
+                w.write_u8(PAYLOAD_COMMAND);
+                w.write_u64(data.len() as u64);
+                w.write_bytes(data);
+            }
+        }
     }
 }
-
-// #[derive(Serialize)]
-// pub(crate) struct Batch<'a> {
-//     pub hard_state: Option<HardState>,
-//     pub truncate_from: Option<LogIndex>,
-//     pub snapshot: Option<SnapshotMeta>,
-//     pub entries: &'a [Entry],
-// }
-//
-// impl<'a> Batch<'a> {
-//     pub(crate) fn new(ready: &'a Ready) -> Self {
-//         Self {
-//             hard_state: ready.hard_state,
-//             truncate_from: ready.truncate_from,
-//             snapshot: ready.snapshot.as_ref().map(|s| s.meta),
-//             entries: &ready.entries,
-//         }
-//     }
-// }
-//
-// /// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
-// #[derive(Deserialize)]
-// pub(crate) struct OwnedBatch {
-//     pub hard_state: Option<HardState>,
-//     pub truncate_from: Option<LogIndex>,
-//     pub snapshot_meta: Option<SnapshotMeta>,
-//     pub entries: Vec<Entry>,
-// }
 
 struct ReadCursor<'a> {
     buf: &'a [u8],
@@ -232,186 +320,3 @@ impl<'a> WriteCursor<'a> {
         self.write_bytes(&v.to_le_bytes());
     }
 }
-
-// pub(crate) fn encode(batch: &Batch<'_>, out: &mut Vec<u8>) {
-//     let mut c = WriteCursor::new(out);
-//
-//     c.write_u32(WAL_MAGIC);
-//     c.write_zeros(8); // save space for later, length and crc32
-//
-//     match batch.hard_state {
-//         Some(hs) => {
-//             c.write_u8(1);
-//             c.write_u64(hs.term);
-//             match hs.voted_for {
-//                 Some(voted_for) => {
-//                     c.write_u8(1);
-//                     c.write_u64(voted_for);
-//                 }
-//                 None => c.write_zeros(9),
-//             }
-//         }
-//         None => c.write_zeros(18),
-//     }
-//
-//     match batch.truncate_from {
-//         Some(truncate_from) => {
-//             c.write_u8(1);
-//             c.write_u64(truncate_from);
-//         }
-//         None => c.write_zeros(9),
-//     }
-//
-//     match batch.snapshot {
-//         Some(meta) => {
-//             c.write_u8(1);
-//             c.write_u64(meta.last_index);
-//             c.write_u64(meta.last_term);
-//         }
-//         None => c.write_zeros(17),
-//     }
-//
-//     // |     entry_count(8b)                                                      |
-//     // |--------------------------------------------------------------------      |
-//     // | entries payload:                                                         |
-//     // |     [entry 0: index (8b) | term (8b) | type (1b) | len (4b) | data]      |
-//     // |     etc...                                                               |
-//     // TODO: write crc and len
-//
-//     let entries = Vec::new();
-//     for entry in batch.entries {}
-//
-//     todo!()
-// }
-//
-// fn encode_entry(entry: &Entry) -> Option<Vec<u8>> {
-//     todo!()
-// }
-//
-// /// Decode all valid [`Batch`] frames form 'buf'. Stops at the first torn or corrupted frame.
-// /// Returns `(batches, bytes_consumed, has_corrupted_tail)`
-// pub(crate) fn decode(buf: &[u8]) -> io::Result<(Vec<OwnedBatch>, usize, bool)> {
-//     let mut batches: Vec<OwnedBatch> = Vec::new();
-//     let mut offset = 0;
-//
-//     while offset < buf.len() {
-//         let rem = &buf[offset..];
-//
-//         // torn frame header
-//         if rem.len() < WalFrameHeader::LEN {
-//             return Ok((batches, offset, true));
-//         }
-//
-//         let frame_header = WalFrameHeader::from_bytes(
-//             rem[..WalFrameHeader::LEN]
-//                 .try_into()
-//                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, ""))?,
-//         );
-//
-//         if frame_header.magic == 0 {
-//             let is_tail_clean = rem.iter().all(|&v| v == 0);
-//             return Ok((batches, offset, !is_tail_clean));
-//         }
-//
-//         // corrupted magic
-//         if frame_header.magic != WAL_MAGIC {
-//             return Ok((batches, offset, true));
-//         }
-//
-//         // torn payload
-//         let frame_len = WalFrameHeader::LEN + frame_header.len as usize;
-//         if frame_len > rem.len() {
-//             return Ok((batches, offset, true));
-//         }
-//
-//         // corrupted payload
-//         let payload = &rem[WalFrameHeader::LEN..frame_len];
-//         if frame_header.crc != crc32fast::hash(payload) {
-//             return Ok((batches, offset, true));
-//         }
-//
-//         // batch decode failed
-//         let Some(batch) = decode_batch(payload) else {
-//             return Ok((batches, offset, true));
-//         };
-//
-//         offset += frame_len;
-//         batches.push(batch);
-//     }
-//
-//     Ok((batches, offset, false))
-// }
-//
-// fn decode_batch(buf: &[u8]) -> Option<OwnedBatch> {
-//     let mut c = ReadCursor::new(buf);
-//
-//     let hard_state = match c.read_u8()? {
-//         0 => {
-//             c.advance(24);
-//             None
-//         }
-//         1 => {
-//             let term = c.read_u64()?;
-//             let voted_for = c.read_u64();
-//             Some(HardState { term, voted_for })
-//         }
-//         _ => return None,
-//     };
-//
-//     let truncate_from: Option<LogIndex> = match c.read_u8()? {
-//         0 => {
-//             c.advance(8);
-//             None
-//         }
-//         1 => {
-//             let truncate_from = c.read_u64()?;
-//             Some(truncate_from)
-//         }
-//         _ => return None,
-//     };
-//
-//     let snapshot_meta = match c.read_u8()? {
-//         0 => {
-//             c.advance(16);
-//             None
-//         }
-//         1 => {
-//             let last_index = c.read_u64()?;
-//             let last_term = c.read_u64()?;
-//             Some(SnapshotMeta {
-//                 last_index,
-//                 last_term,
-//             })
-//         }
-//         _ => return None,
-//     };
-//
-//     let entry_count = c.read_u64()?;
-//     let mut entries = Vec::new();
-//     for _ in 0..entry_count {
-//         let index = c.read_u64()?;
-//         let term = c.read_u64()?;
-//         let payload_type = c.read_u8()?;
-//         let len = c.read_u32()?;
-//         let data = c.read_bytes(len as usize)?.to_vec();
-//
-//         let payload = match payload_type {
-//             PAYLOAD_NOOP => Payload::Noop,
-//             PAYLOAD_COMMAND => Payload::Command(data),
-//             _ => return None,
-//         };
-//
-//         entries.push(Entry {
-//             term,
-//             index,
-//             payload,
-//         });
-//     }
-//
-//     Some(OwnedBatch {
-//         hard_state,
-//         truncate_from,
-//         snapshot_meta,
-//         entries,
-//     })
-// }
