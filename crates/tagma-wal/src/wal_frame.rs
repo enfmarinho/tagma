@@ -1,11 +1,13 @@
-use core::{error, fmt};
-use std::io;
-
+use core::fmt;
 use tagma_raft::{
     Entry, HardState, LogIndex, PAYLOAD_COMMAND, PAYLOAD_NOOP, Payload, Ready, SnapshotMeta,
 };
 
-use crate::storage::{self, WAL_MAGIC};
+/// Magic number marking the start of a serialized WAL batch frame.
+const WAL_MAGIC: u32 = u32::from_le_bytes(*b"TGM\x01");
+
+/// WAL Segment size in MB.
+pub(crate) const SEGMENT_SIZE: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WalError {
@@ -26,7 +28,7 @@ impl fmt::Display for WalError {
 }
 impl std::error::Error for WalError {}
 
-struct DecodeOutcome {
+pub(crate) struct DecodeOutcome {
     pub batches: Vec<WalBatch>,
     pub bytes_consumed: usize,
     pub has_corrupted_tail: bool,
@@ -54,7 +56,37 @@ impl WalFrame {
         batch: &WalBatch<E>,
         out: &mut Vec<u8>,
     ) -> Result<(), WalError> {
-        todo!()
+        let entries = batch.entries.as_ref();
+
+        let mut entries_len: usize = 0;
+        for entry in entries {
+            entries_len += EntryRecord::new(entry).encoded_len()?;
+        }
+        let wal_batch_len = BatchHeader::LEN + entries_len;
+        let frame_len = WalFrameHeader::LEN + wal_batch_len;
+        if frame_len > SEGMENT_SIZE {
+            return Err(WalError::FrameToLarge {
+                len: frame_len,
+                max: SEGMENT_SIZE,
+            });
+        }
+
+        let start = out.len();
+        out.resize(start + frame_len, 0);
+
+        let batch_start = start + WalFrameHeader::LEN;
+        let mut w = WriteCursor::new(&mut out[batch_start..]);
+        batch.encode(&mut w);
+        debug_assert_eq!(w.remaining(), 0);
+
+        let crc32 = crc32fast::hash(&out[batch_start..]);
+        let wal_batch_len =
+            u32::try_from(wal_batch_len).expect("max size (SEGMENT_SIZE) fits in u32");
+        let frame_header = WalFrameHeader::new(wal_batch_len, crc32);
+
+        out[start..batch_start].copy_from_slice(&frame_header.to_bytes());
+
+        Ok(())
     }
 
     pub(crate) fn decode_all(buf: &[u8]) -> DecodeOutcome {
@@ -115,7 +147,7 @@ impl WalFrame {
             }
 
             // batch decode failed
-            let Some(batch) = Self::decode_payload(payload) else {
+            let Some(batch) = WalBatch::decode(payload) else {
                 return DecodeOutcome {
                     batches,
                     bytes_consumed,
@@ -133,8 +165,60 @@ impl WalFrame {
             has_corrupted_tail: false,
         }
     }
+}
 
-    fn decode_payload(payload: &[u8]) -> Option<WalBatch> {
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WalFrameHeader {
+    magic: u32,
+    len: u32,
+    crc: u32,
+}
+
+impl WalFrameHeader {
+    const LEN: usize = std::mem::size_of::<Self>();
+
+    fn new(len: u32, crc: u32) -> Self {
+        Self {
+            magic: WAL_MAGIC,
+            len,
+            crc,
+        }
+    }
+
+    fn to_bytes(self) -> [u8; Self::LEN] {
+        unsafe { std::mem::transmute(self) }
+    }
+
+    fn from_bytes(bytes: &[u8; Self::LEN]) -> Self {
+        unsafe { std::mem::transmute(*bytes) }
+    }
+}
+
+/// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
+pub(crate) struct WalBatch<E = Vec<Entry>> {
+    pub(crate) batch_header: BatchHeader,
+    pub(crate) entries: E,
+}
+
+impl<'a> WalBatch<&'a [Entry]> {
+    pub(crate) fn from_ready(ready: &'a Ready) -> Self {
+        Self {
+            batch_header: BatchHeader::from_ready(ready),
+            entries: &ready.entries,
+        }
+    }
+}
+impl<E: AsRef<[Entry]>> WalBatch<E> {
+    fn encode(&self, w: &mut WriteCursor) {
+        self.batch_header.encode(w);
+        for entry in self.entries.as_ref() {
+            EntryRecord::new(entry).encode(w);
+        }
+    }
+}
+impl WalBatch<Vec<Entry>> {
+    fn decode(payload: &[u8]) -> Option<Self> {
         let mut r = ReadCursor::new(payload);
         let batch_header = BatchHeader::decode(&mut r)?;
 
@@ -156,54 +240,11 @@ impl WalFrame {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct WalFrameHeader {
-    pub magic: u32,
-    pub len: u32,
-    pub crc: u32,
-}
-
-impl WalFrameHeader {
-    pub(crate) const LEN: usize = std::mem::size_of::<Self>();
-
-    pub(crate) fn new(len: u32, crc: u32) -> Self {
-        Self {
-            magic: storage::WAL_MAGIC,
-            len,
-            crc,
-        }
-    }
-
-    pub(crate) fn to_bytes(self) -> [u8; Self::LEN] {
-        unsafe { std::mem::transmute(self) }
-    }
-
-    pub(crate) fn from_bytes(bytes: &[u8; Self::LEN]) -> Self {
-        unsafe { std::mem::transmute(*bytes) }
-    }
-}
-
-/// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
-pub(crate) struct WalBatch<E = Vec<Entry>> {
-    batch_header: BatchHeader,
-    entries: E,
-}
-
-impl<'a> WalBatch<&'a [Entry]> {
-    pub(crate) fn from_ready(ready: &'a Ready) -> Self {
-        Self {
-            batch_header: BatchHeader::from_ready(ready),
-            entries: &ready.entries,
-        }
-    }
-}
-
 pub(crate) struct BatchHeader {
-    pub hard_state: Option<HardState>,
-    pub truncate_from: Option<LogIndex>,
-    pub meta: Option<SnapshotMeta>,
-    pub entry_count: u64,
+    pub(crate) hard_state: Option<HardState>,
+    pub(crate) truncate_from: Option<LogIndex>,
+    pub(crate) meta: Option<SnapshotMeta>,
+    pub(crate) entry_count: u64,
 }
 
 impl BatchHeader {
@@ -307,7 +348,7 @@ impl BatchHeader {
     }
 }
 
-pub(crate) struct EntryRecord<'a> {
+struct EntryRecord<'a> {
     entry: &'a Entry,
 }
 
@@ -343,6 +384,23 @@ impl<'a> EntryRecord<'a> {
             index,
             payload,
         })
+    }
+
+    fn encoded_len(&self) -> Result<usize, WalError> {
+        let payload_len = match &self.entry.payload {
+            Payload::Noop => 0,
+            Payload::Command(payload) => {
+                if payload.len() > SEGMENT_SIZE {
+                    return Err(WalError::FrameToLarge {
+                        len: payload.len(),
+                        max: SEGMENT_SIZE,
+                    });
+                }
+                payload.len()
+            }
+        };
+
+        Ok(Self::LEN + payload_len)
     }
 
     fn encode(&self, w: &mut WriteCursor) {
