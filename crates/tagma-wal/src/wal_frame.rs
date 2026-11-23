@@ -1,15 +1,30 @@
+use core::{error, fmt};
 use std::io;
 
-use serde::{Deserialize, Serialize};
 use tagma_raft::{
     Entry, HardState, LogIndex, PAYLOAD_COMMAND, PAYLOAD_NOOP, Payload, Ready, SnapshotMeta,
 };
 
 use crate::storage::{self, WAL_MAGIC};
 
-enum WalError {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WalError {
     FrameToLarge { len: usize, max: usize },
 }
+
+impl fmt::Display for WalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FrameToLarge { len, max } => {
+                write!(
+                    f,
+                    "WAL frame payload ({len} bytes) exceeds max ({max} bytes)"
+                )
+            }
+        }
+    }
+}
+impl std::error::Error for WalError {}
 
 struct DecodeOutcome {
     pub batches: Vec<WalBatch>,
@@ -43,7 +58,101 @@ impl WalFrame {
     }
 
     pub(crate) fn decode_all(buf: &[u8]) -> DecodeOutcome {
-        todo!()
+        let mut batches: Vec<WalBatch> = Vec::new();
+        let mut bytes_consumed = 0;
+
+        while bytes_consumed < buf.len() {
+            let rem = &buf[bytes_consumed..];
+
+            // torn frame header
+            if rem.len() < WalFrameHeader::LEN {
+                return DecodeOutcome {
+                    batches,
+                    bytes_consumed,
+                    has_corrupted_tail: true,
+                };
+            }
+
+            let frame_header =
+                WalFrameHeader::from_bytes(rem[..WalFrameHeader::LEN].try_into().unwrap());
+
+            if frame_header.magic == 0 {
+                let is_tail_clean = rem.iter().all(|&v| v == 0);
+                return DecodeOutcome {
+                    batches,
+                    bytes_consumed,
+                    has_corrupted_tail: !is_tail_clean,
+                };
+            }
+
+            // corrupted magic
+            if frame_header.magic != WAL_MAGIC {
+                return DecodeOutcome {
+                    batches,
+                    bytes_consumed,
+                    has_corrupted_tail: true,
+                };
+            }
+
+            // torn payload
+            let frame_len = WalFrameHeader::LEN + frame_header.len as usize;
+            if frame_len > rem.len() {
+                return DecodeOutcome {
+                    batches,
+                    bytes_consumed,
+                    has_corrupted_tail: true,
+                };
+            }
+
+            // corrupted payload
+            let payload = &rem[WalFrameHeader::LEN..frame_len];
+            if frame_header.crc != crc32fast::hash(payload) {
+                return DecodeOutcome {
+                    batches,
+                    bytes_consumed,
+                    has_corrupted_tail: true,
+                };
+            }
+
+            // batch decode failed
+            let Some(batch) = Self::decode_payload(payload) else {
+                return DecodeOutcome {
+                    batches,
+                    bytes_consumed,
+                    has_corrupted_tail: true,
+                };
+            };
+
+            bytes_consumed += frame_len;
+            batches.push(batch);
+        }
+
+        DecodeOutcome {
+            batches,
+            bytes_consumed,
+            has_corrupted_tail: false,
+        }
+    }
+
+    fn decode_payload(payload: &[u8]) -> Option<WalBatch> {
+        let mut r = ReadCursor::new(payload);
+        let batch_header = BatchHeader::decode(&mut r)?;
+
+        let count = batch_header.entry_count as usize;
+        if count > r.remaining() / EntryRecord::LEN {
+            return None;
+        }
+
+        let mut entries = Vec::with_capacity(count);
+        for _ in 0..count {
+            let entry = EntryRecord::decode(&mut r)?;
+            entries.push(entry);
+        }
+
+        (r.remaining() == 0).then_some(WalBatch {
+            batch_header,
+            entries,
+        })
     }
 }
 
@@ -76,9 +185,18 @@ impl WalFrameHeader {
 }
 
 /// Atomic durable batch frame corresponding to a [`tagma_raft::Ready`] output.
-struct WalBatch<E = Vec<Entry>> {
+pub(crate) struct WalBatch<E = Vec<Entry>> {
     batch_header: BatchHeader,
     entries: E,
+}
+
+impl<'a> WalBatch<&'a [Entry]> {
+    pub(crate) fn from_ready(ready: &'a Ready) -> Self {
+        Self {
+            batch_header: BatchHeader::from_ready(ready),
+            entries: &ready.entries,
+        }
+    }
 }
 
 pub(crate) struct BatchHeader {
@@ -91,7 +209,7 @@ pub(crate) struct BatchHeader {
 impl BatchHeader {
     const LEN: usize = 18 + 9 + 17 + 8;
 
-    fn new(ready: &Ready) -> Self {
+    fn from_ready(ready: &Ready) -> Self {
         Self {
             hard_state: ready.hard_state,
             truncate_from: ready.truncate_from,
@@ -320,3 +438,33 @@ impl<'a> WriteCursor<'a> {
         self.write_bytes(&v.to_le_bytes());
     }
 }
+
+// fn decode_batch(buf: &[u8]) -> Option<OwnedBatch> {
+//     let mut entries = Vec::new();
+//     for _ in 0..entry_count {
+//         let index = c.read_u64()?;
+//         let term = c.read_u64()?;
+//         let payload_type = c.read_u8()?;
+//         let len = c.read_u32()?;
+//         let data = c.read_bytes(len as usize)?.to_vec();
+//
+//         let payload = match payload_type {
+//             PAYLOAD_NOOP => Payload::Noop,
+//             PAYLOAD_COMMAND => Payload::Command(data),
+//             _ => return None,
+//         };
+//
+//         entries.push(Entry {
+//             term,
+//             index,
+//             payload,
+//         });
+//     }
+//
+//     Some(OwnedBatch {
+//         hard_state,
+//         truncate_from,
+//         snapshot_meta,
+//         entries,
+//     })
+// }
