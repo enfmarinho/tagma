@@ -12,6 +12,9 @@ use tagma_raft::{HardState, LogIndex, Ready, Restored, Snapshot, SnapshotMeta};
 /// Filename prefix for segmented WAL files (`WAL_FILE_PREF-{segment_id}.log`).
 const WAL_FILE_PREF: &str = "wal";
 
+const TMP_FILE_EXT: &str = ".tmp";
+const LOG_FILE_EXT: &str = ".log";
+
 /// Filename prefix for state machine snapshots (`SNAPSHOT_FILE_PREF-{index}-{term}.log`).
 const SNAPSHOT_FILE_PREF: &str = "snapshot";
 
@@ -140,7 +143,7 @@ impl<F: Fs> Storage<F> {
             ));
         }
 
-        Self::check_for_missing_segment(&mut fs, &inv)?;
+        Self::check_for_missing_segment(&inv)?;
 
         let snapshot = Self::load_snapshot(&mut fs, &inv)?;
         // Delete all snapshots older than the one used
@@ -244,10 +247,10 @@ impl<F: Fs> Storage<F> {
         WAL_FILE_PREF.to_string() + "-" + &id.to_string()
     }
     fn segment_filename_log(id: u64) -> String {
-        Self::segment_filename(id) + ".log"
+        Self::segment_filename(id) + LOG_FILE_EXT
     }
     fn segment_filename_tmp(id: u64) -> String {
-        Self::segment_filename(id) + ".tmp"
+        Self::segment_filename(id) + TMP_FILE_EXT
     }
 
     fn snapshot_filename(meta: SnapshotMeta) -> String {
@@ -258,10 +261,7 @@ impl<F: Fs> Storage<F> {
             + &meta.last_term.to_string()
     }
     fn snapshot_filename_log(meta: SnapshotMeta) -> String {
-        Self::snapshot_filename(meta) + ".log"
-    }
-    fn snapshot_filename_tmp(meta: SnapshotMeta) -> String {
-        Self::snapshot_filename(meta) + ".tmp"
+        Self::snapshot_filename(meta) + LOG_FILE_EXT
     }
 
     fn parse_segment_filename(filename: &str) -> Option<u64> {
@@ -284,7 +284,7 @@ impl<F: Fs> Storage<F> {
         })
     }
 
-    fn check_for_missing_segment(fs: &mut F, inv: &DirInventory) -> io::Result<()> {
+    fn check_for_missing_segment(inv: &DirInventory) -> io::Result<()> {
         // TODO improve, this is to strict and may invalidate valid conditions
         for pair in inv.segments.windows(2) {
             if pair[1].0 != pair[0].0 + 1 {
@@ -503,7 +503,7 @@ impl<F: Fs> Storage<F> {
     ///
     /// # Errors
     /// Returns an [`io::Error`] in case any underlying `fs` operations fails.
-    pub fn compact(&mut self, compact_to: LogIndex) -> io::Result<()> {
+    pub fn compact(&mut self, _compact_to: LogIndex) -> io::Result<()> {
         todo!()
     }
 }
