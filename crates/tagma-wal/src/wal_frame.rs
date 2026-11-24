@@ -39,19 +39,19 @@ pub(crate) struct WalFrame;
 impl WalFrame {
     /// Encode a [`Batch`] and writes it to the `out` buffer.
     ///
-    /// |--------------------------------------------------------------------------|
-    /// | Magic (4b)    | Length (4b)    | CRC32 (4b)                              |
-    /// |--------------------------------------------------------------------------|
-    /// | Batch Header:                                                            |
-    /// |     has_hard_state (1b) | term(8b) | has_voted_for (1b) | voted_for (8b) |
-    /// |     has_truncate (1b)   | truncate_from (8b)                             |  
-    /// |     has_snapshot (1b)   | snap_index (8b)     | snap_term (8b)           |
-    /// |     entry_count(8b)                                                      |
-    /// |--------------------------------------------------------------------      |
-    /// | entries payload:                                                         |
-    /// |     [entry 0: index (8b) | term (8b) | type (1b) | len (4b) | data       |
-    /// |     etc...                                                               |
-    /// |--------------------------------------------------------------------------|
+    /// |--------------------------------------------------------------------|
+    /// | Magic (4b)    | Length (4b)    | CRC32 (4b)                        |
+    /// |--------------------------------------------------------------------|
+    /// | Batch Header:                                                      |
+    /// |     term(8b)            | has_voted_for (1b)  | voted_for (8b)     |
+    /// |     has_truncate (1b)   | truncate_from (8b)                       |  
+    /// |     has_snapshot (1b)   | snap_index (8b)     | snap_term (8b)     |
+    /// |     entry_count(8b)                                                |
+    /// |--------------------------------------------------------------------|
+    /// | entries payload:                                                   |
+    /// |     [entry 0: index (8b) | term (8b) | type (1b) | len (4b) | data |
+    /// |     etc...                                                         |
+    /// |--------------------------------------------------------------------|
     pub(crate) fn encode<E: AsRef<[Entry]>>(
         batch: &WalBatch<E>,
         out: &mut Vec<u8>,
@@ -202,9 +202,13 @@ pub(crate) struct WalBatch<E = Vec<Entry>> {
 }
 
 impl<'a> WalBatch<&'a [Entry]> {
-    pub(crate) fn from_ready(ready: &'a Ready) -> Self {
+    pub(crate) fn from_ready(
+        ready: &'a Ready,
+        hard_state: HardState,
+        meta: Option<SnapshotMeta>,
+    ) -> Self {
         Self {
-            batch_header: BatchHeader::from_ready(ready),
+            batch_header: BatchHeader::from_ready(ready, hard_state, meta),
             entries: &ready.entries,
         }
     }
@@ -241,7 +245,7 @@ impl WalBatch<Vec<Entry>> {
 }
 
 pub(crate) struct BatchHeader {
-    pub(crate) hard_state: Option<HardState>,
+    pub(crate) hard_state: HardState,
     pub(crate) truncate_from: Option<LogIndex>,
     pub(crate) meta: Option<SnapshotMeta>,
     pub(crate) entry_count: u64,
@@ -250,28 +254,27 @@ pub(crate) struct BatchHeader {
 impl BatchHeader {
     const LEN: usize = 18 + 9 + 17 + 8;
 
-    fn from_ready(ready: &Ready) -> Self {
+    fn from_ready(ready: &Ready, hard_state: HardState, meta: Option<SnapshotMeta>) -> Self {
         Self {
-            hard_state: ready.hard_state,
+            hard_state,
             truncate_from: ready.truncate_from,
-            meta: ready.snapshot.as_ref().map(|s| s.meta),
+            meta,
             entry_count: ready.entries.len() as u64,
         }
     }
 
     fn decode(r: &mut ReadCursor) -> Option<Self> {
-        let hard_state = match r.read_u8()? {
+        let term = r.read_u64()?;
+        let has_voted_for = r.read_u8()?;
+        let voted_for = match has_voted_for {
             0 => {
-                r.advance(24);
+                r.advance(8);
                 None
             }
-            1 => {
-                let term = r.read_u64()?;
-                let voted_for = r.read_u64();
-                Some(HardState { term, voted_for })
-            }
+            1 => Some(r.read_u64()?),
             _ => return None,
         };
+        let hard_state = HardState { term, voted_for };
 
         let truncate_from: Option<LogIndex> = match r.read_u8()? {
             0 => {
@@ -312,19 +315,13 @@ impl BatchHeader {
     }
 
     fn encode(&self, w: &mut WriteCursor) {
-        match self.hard_state {
-            Some(hs) => {
+        w.write_u64(self.hard_state.term);
+        match self.hard_state.voted_for {
+            Some(voted_for) => {
                 w.write_u8(1);
-                w.write_u64(hs.term);
-                match hs.voted_for {
-                    Some(voted_for) => {
-                        w.write_u8(1);
-                        w.write_u64(voted_for);
-                    }
-                    None => w.write_zeros(9),
-                }
+                w.write_u64(voted_for);
             }
-            None => w.write_zeros(18),
+            None => w.write_zeros(9),
         }
 
         match self.truncate_from {
