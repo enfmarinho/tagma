@@ -34,6 +34,9 @@ pub struct Storage<F: Fs> {
     /// Max index present in the active WAL segment.
     active_segment_max_index: LogIndex,
 
+    /// Latest hard state
+    latest_hard_state: HardState,
+
     /// Index when the latest snapshot was taken.
     latest_snapshot_meta: Option<SnapshotMeta>,
 
@@ -115,6 +118,10 @@ impl<F: Fs> Storage<F> {
                     active_segment_id: 1,
                     active_segment_offset: 0,
                     active_segment_max_index: 0,
+                    latest_hard_state: HardState {
+                        term: 0,
+                        voted_for: None,
+                    },
                     latest_snapshot_meta: None,
                     sealed_segments: VecDeque::new(),
                     scratch_buf: Vec::with_capacity(SEGMENT_SIZE),
@@ -209,6 +216,7 @@ impl<F: Fs> Storage<F> {
             Self {
                 fs,
                 active_segment_id: last_id,
+                latest_hard_state: last_hard_state,
                 latest_snapshot_meta: meta,
                 active_segment_offset: last_offset,
                 active_segment_max_index: last_max_index,
@@ -368,50 +376,56 @@ impl<F: Fs> Storage<F> {
     /// on error durability is not garanteed and the caller cannot proceed with the
     /// [`Ready`] contract, i.e. cannot procede to step 2.
     pub fn persist(&mut self, ready: &Ready) -> io::Result<()> {
-        // if let Some(snapshot) = &ready.snapshot {
-        //     self.persist_snapshot(snapshot)?;
-        // }
-        //
-        // let batch = Batch::new(ready);
-        // self.scratch_buf.clear();
-        // frame::encode(&batch, &mut self.scratch_buf);
-        //
-        // let payload_len = self.scratch_buf[WalFrameHeader::LEN..].len();
-        //
-        // if payload_len > SEGMENT_SIZE {
-        //     // this is an unrealistic control path, considering the unlikelihood of the
-        //     // Vec<Entry> growing so much to make this happens. I believe its impossible
-        //     return Err(Error::new(
-        //         io::ErrorKind::InvalidInput,
-        //         "Payload is bigger than a segment file.",
-        //     ));
-        // }
-        //
-        // // Create new segment
-        // if payload_len + self.active_segment_offset > SEGMENT_SIZE {
-        //     self.new_segment()?;
-        // }
-        //
-        // if let Some(max_index) = ready.entries.last().map(|e| e.index) {
-        //     self.active_segment_max_index = max_index;
-        // };
-        // let payload = &self.scratch_buf[WalFrameHeader::LEN..];
-        //
-        // // Safety: this cast to u32 is safe since payload_len is smaller than SEGMENT_SIZE
-        // let frame_header = WalFrameHeader::new(payload_len as u32, crc32fast::hash(payload));
-        //
-        // self.scratch_buf[..WalFrameHeader::LEN].copy_from_slice(&frame_header.to_bytes());
-        //
-        // let segment_filename = &Self::segment_filename(self.active_segment_id);
-        // let segment_filename_tmp = &(segment_filename.clone() + ".tmp");
-        // let segment_filename_log = &(segment_filename.clone() + ".log");
-        //
-        // self.fs.write(segment_filename_tmp, &self.scratch_buf)?;
-        // self.fs.sync(segment_filename_tmp)?;
-        //
-        // self.fs.rename(segment_filename_tmp, segment_filename_log)?;
-        // self.fs.sync_dir()?;
-        //
+        if let Some(snapshot) = &ready.snapshot {
+            self.persist_snapshot(snapshot)?;
+        }
+
+        if let Some(hs) = ready.hard_state {
+            self.latest_hard_state = hs;
+        }
+        if let Some(snapshot) = &ready.snapshot {
+            self.latest_snapshot_meta = Some(snapshot.meta);
+        }
+
+        let batch = wal_frame::WalBatch::from_ready(
+            ready,
+            self.latest_hard_state,
+            self.latest_snapshot_meta,
+        );
+        self.scratch_buf.clear();
+        wal_frame::WalFrame::encode(&batch, &mut self.scratch_buf)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Could not encode ready!"))?;
+
+        let payload_len = self.scratch_buf.len();
+
+        if payload_len > SEGMENT_SIZE {
+            // this is an unrealistic control path, considering the unlikelihood of the
+            // Vec<Entry> growing so much to make this happens. I believe its impossible
+            return Err(Error::new(
+                io::ErrorKind::InvalidInput,
+                "Payload is bigger than a segment file.",
+            ));
+        }
+
+        // Create new segment
+        if payload_len + self.active_segment_offset > SEGMENT_SIZE {
+            self.new_segment()?;
+        }
+
+        if let Some(max_index) = ready.entries.last().map(|e| e.index) {
+            self.active_segment_max_index = max_index;
+        };
+
+        let segment_filename = &Self::segment_filename(self.active_segment_id);
+        let segment_filename_tmp = &(segment_filename.clone() + ".tmp");
+        let segment_filename_log = &(segment_filename.clone() + ".log");
+
+        self.fs.write(segment_filename_tmp, &self.scratch_buf)?;
+        self.fs.sync(segment_filename_tmp)?;
+
+        self.fs.rename(segment_filename_tmp, segment_filename_log)?;
+        self.fs.sync_dir()?;
+
         Ok(())
     }
 
