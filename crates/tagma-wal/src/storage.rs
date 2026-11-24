@@ -1,7 +1,7 @@
 use crate::{
-    frame::SnapshotFrameHeader,
-    frame::{self, Batch, WalFrameHeader},
     fs::Fs,
+    snapshot_frame::SnapshotFrameHeader,
+    wal_frame::{self, SEGMENT_SIZE},
 };
 use std::{
     collections::VecDeque,
@@ -10,16 +10,10 @@ use std::{
 use tagma_raft::{HardState, LogIndex, Ready, Restored, Snapshot, SnapshotMeta};
 
 /// Filename prefix for segmented WAL files (`WAL_FILE_PREF-{segment_id}.log`).
-pub(crate) const WAL_FILE_PREF: &str = "wal";
+const WAL_FILE_PREF: &str = "wal";
 
 /// Filename prefix for state machine snapshots (`SNAPSHOT_FILE_PREF-{index}-{term}.log`).
-pub(crate) const SNAPSHOT_FILE_PREF: &str = "snapshot";
-
-/// Magic number marking the start of a serialized WAL batch frame.
-pub(crate) const WAL_MAGIC: u32 = u32::from_le_bytes(*b"TGM\x01");
-
-/// WAL Segment size in MB.
-pub(crate) const SEGMENT_SIZE: usize = 64 * 1024 * 1024;
+const SNAPSHOT_FILE_PREF: &str = "snapshot";
 
 /// WAL sealed segment metadata.
 struct SealedSegment {
@@ -41,7 +35,7 @@ pub struct Storage<F: Fs> {
     active_segment_max_index: LogIndex,
 
     /// Index when the latest snapshot was taken.
-    latest_snapshot_meta: SnapshotMeta,
+    latest_snapshot_meta: Option<SnapshotMeta>,
 
     /// Sealed segments metadata.
     sealed_segments: VecDeque<SealedSegment>,
@@ -121,12 +115,9 @@ impl<F: Fs> Storage<F> {
                     active_segment_id: 1,
                     active_segment_offset: 0,
                     active_segment_max_index: 0,
-                    latest_snapshot_meta: SnapshotMeta {
-                        last_index: 0,
-                        last_term: 0,
-                    },
+                    latest_snapshot_meta: None,
                     sealed_segments: VecDeque::new(),
-                    scratch_buf: Vec::new(),
+                    scratch_buf: Vec::with_capacity(SEGMENT_SIZE),
                 },
                 Recovered {
                     restored: Restored {
@@ -147,26 +138,96 @@ impl<F: Fs> Storage<F> {
         let snapshot = Self::load_snapshot(&mut fs, &inv)?;
         // Delete all snapshots older than the one used
         let mut deleted = false;
-        for (meta, filename) in inv.snapshots {
-            if meta.last_index < snapshot.meta.last_index {
-                fs.remove(&filename)?;
-                deleted = true;
+        let meta = if let Some(snapshot) = &snapshot {
+            for (meta, filename) in inv.snapshots {
+                if meta.last_index < snapshot.meta.last_index {
+                    fs.remove(&filename)?;
+                    deleted = true;
+                }
             }
-        }
-        if deleted {
-            fs.sync_dir()?;
+            if deleted {
+                fs.sync_dir()?;
+            }
+
+            Some(snapshot.meta)
+        } else {
+            None
+        };
+
+        let mut last_id: u64 = 0;
+        let mut last_offset = 0;
+        let mut last_max_index = 0;
+        let mut last_hard_state = HardState {
+            term: 0,
+            voted_for: None,
+        };
+        let mut entries = Vec::new();
+        for (id, filename) in &inv.segments {
+            // TODO improve error handling, it may still be possible to build the state without a
+            // giving segment
+            let buf = match fs.read(filename)? {
+                Some(v) => v,
+                None => {
+                    // segment
+                    fs.remove(filename)?;
+                    fs.sync_dir()?;
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "WAL segment could not be read",
+                    ));
+                }
+            };
+
+            let out = wal_frame::WalFrame::decode_all(&buf);
+            if out.has_corrupted_tail {
+                fs.truncate(filename, out.bytes_consumed as u64)?;
+                fs.sync(filename)?;
+            }
+
+            last_id = *id;
+            last_offset = out.bytes_consumed;
+
+            let Some(last_batch) = out.batches.last() else {
+                continue;
+            };
+            for batch in &out.batches {
+                entries.extend_from_slice(batch.entries.as_slice());
+                last_max_index = if let Some(entry) = entries.last() {
+                    entry.index
+                } else {
+                    0
+                };
+            }
+
+            last_hard_state = last_batch.batch_header.hard_state;
         }
 
-        // TODO: replay segments entries
-
-        if inv.segments.is_empty() { // all segments were compacted after a snapshot
+        if inv.segments.is_empty() { // TODO: all segments were compacted after a snapshot
         }
 
-        todo!()
+        Ok((
+            Self {
+                fs,
+                active_segment_id: last_id,
+                latest_snapshot_meta: meta,
+                active_segment_offset: last_offset,
+                active_segment_max_index: last_max_index,
+                sealed_segments: VecDeque::new(),
+                scratch_buf: Vec::with_capacity(SEGMENT_SIZE),
+            },
+            Recovered {
+                restored: Restored {
+                    hard_state: last_hard_state,
+                    snapshot: meta,
+                    entries,
+                },
+                snapshot_data: snapshot.map(|s| s.data),
+            },
+        ))
     }
 
     fn init_fs(fs: &mut F) -> io::Result<()> {
-        fs.create(&Self::segment_filename_log(1), SEGMENT_SIZE)?;
+        fs.create(&Self::segment_filename_log(1), wal_frame::SEGMENT_SIZE)?;
         fs.sync_dir()?;
         Ok(())
     }
@@ -231,23 +292,15 @@ impl<F: Fs> Storage<F> {
         Ok(())
     }
 
-    fn load_snapshot(fs: &mut F, inv: &DirInventory) -> io::Result<Snapshot> {
-        let empty_snapshot = Snapshot {
-            meta: SnapshotMeta {
-                last_index: 0,
-                last_term: 0,
-            },
-            data: Vec::new(),
-        };
-
+    fn load_snapshot(fs: &mut F, inv: &DirInventory) -> io::Result<Option<Snapshot>> {
         let Some((meta, filename)) = inv.snapshots.last() else {
-            return Ok(empty_snapshot);
+            return Ok(None);
         };
 
         let filename = Self::snapshot_filename_log(*meta);
         let snapshot_frame_data = fs.read(&filename)?;
         let Some(mut snapshot_frame_data) = snapshot_frame_data else {
-            return Ok(empty_snapshot);
+            return Ok(None);
         };
 
         let (frame_header_bytes, _) = snapshot_frame_data.split_at(SnapshotFrameHeader::LEN);
@@ -278,10 +331,10 @@ impl<F: Fs> Storage<F> {
             ));
         }
 
-        Ok(Snapshot {
+        Ok(Some(Snapshot {
             meta: *meta,
             data: snapshot_bytes,
-        })
+        }))
     }
 
     /// Step 1 of the [`Ready`] contract. Persist the durable state to disk.
@@ -297,7 +350,7 @@ impl<F: Fs> Storage<F> {
     /// | Magic (4B)    | Length (4B)    | CRC32 (4B)                         |
     /// |---------------------------------------------------------------------|
     /// | Batch Header:                                                       |
-    /// |     has_hard_state (1B) | term(8B) | vote (8B) | commit (8B)        |
+    /// |     has_hard_state (1B) | term(8B)            | vote (8B)           |
     /// |     has_truncate (1B)   | truncate_from (8B)                        |  
     /// |     has_snapshot (1B)   | snap_index (8B)     | snap_term (8B)      |
     /// |     entry_count(8B)                                                 |
@@ -315,52 +368,50 @@ impl<F: Fs> Storage<F> {
     /// on error durability is not garanteed and the caller cannot proceed with the
     /// [`Ready`] contract, i.e. cannot procede to step 2.
     pub fn persist(&mut self, ready: &Ready) -> io::Result<()> {
-        if let Some(snapshot) = &ready.snapshot {
-            self.persist_snapshot(snapshot)?;
-        }
-
-        self.scratch_buf.clear();
-        self.scratch_buf.resize(WalFrameHeader::LEN, 0);
-
-        let batch = Batch::new(ready);
-        frame::encode(&batch, &mut self.scratch_buf);
-
-        let payload_len = self.scratch_buf[WalFrameHeader::LEN..].len();
-
-        if payload_len > SEGMENT_SIZE {
-            // this is an unrealistic control path, considering the unlikelihood of the
-            // Vec<Entry> growing so much to make this happens. I believe its impossible
-            return Err(Error::new(
-                io::ErrorKind::InvalidInput,
-                "Payload is bigger than a segment file.",
-            ));
-        }
-
-        // Create new segment
-        if payload_len + self.active_segment_offset > SEGMENT_SIZE {
-            self.new_segment()?;
-        }
-
-        if let Some(max_index) = ready.entries.last().map(|e| e.index) {
-            self.active_segment_max_index = max_index;
-        };
-        let payload = &self.scratch_buf[WalFrameHeader::LEN..];
-
-        // Safety: this cast to u32 is safe since payload_len is smaller than SEGMENT_SIZE
-        let frame_header = WalFrameHeader::new(payload_len as u32, crc32fast::hash(payload));
-
-        self.scratch_buf[..WalFrameHeader::LEN].copy_from_slice(&frame_header.to_bytes());
-
-        let segment_filename = &Self::segment_filename(self.active_segment_id);
-        let segment_filename_tmp = &(segment_filename.clone() + ".tmp");
-        let segment_filename_log = &(segment_filename.clone() + ".log");
-
-        self.fs.write(segment_filename_tmp, &self.scratch_buf)?;
-        self.fs.sync(segment_filename_tmp)?;
-
-        self.fs.rename(segment_filename_tmp, segment_filename_log)?;
-        self.fs.sync_dir()?;
-
+        // if let Some(snapshot) = &ready.snapshot {
+        //     self.persist_snapshot(snapshot)?;
+        // }
+        //
+        // let batch = Batch::new(ready);
+        // self.scratch_buf.clear();
+        // frame::encode(&batch, &mut self.scratch_buf);
+        //
+        // let payload_len = self.scratch_buf[WalFrameHeader::LEN..].len();
+        //
+        // if payload_len > SEGMENT_SIZE {
+        //     // this is an unrealistic control path, considering the unlikelihood of the
+        //     // Vec<Entry> growing so much to make this happens. I believe its impossible
+        //     return Err(Error::new(
+        //         io::ErrorKind::InvalidInput,
+        //         "Payload is bigger than a segment file.",
+        //     ));
+        // }
+        //
+        // // Create new segment
+        // if payload_len + self.active_segment_offset > SEGMENT_SIZE {
+        //     self.new_segment()?;
+        // }
+        //
+        // if let Some(max_index) = ready.entries.last().map(|e| e.index) {
+        //     self.active_segment_max_index = max_index;
+        // };
+        // let payload = &self.scratch_buf[WalFrameHeader::LEN..];
+        //
+        // // Safety: this cast to u32 is safe since payload_len is smaller than SEGMENT_SIZE
+        // let frame_header = WalFrameHeader::new(payload_len as u32, crc32fast::hash(payload));
+        //
+        // self.scratch_buf[..WalFrameHeader::LEN].copy_from_slice(&frame_header.to_bytes());
+        //
+        // let segment_filename = &Self::segment_filename(self.active_segment_id);
+        // let segment_filename_tmp = &(segment_filename.clone() + ".tmp");
+        // let segment_filename_log = &(segment_filename.clone() + ".log");
+        //
+        // self.fs.write(segment_filename_tmp, &self.scratch_buf)?;
+        // self.fs.sync(segment_filename_tmp)?;
+        //
+        // self.fs.rename(segment_filename_tmp, segment_filename_log)?;
+        // self.fs.sync_dir()?;
+        //
         Ok(())
     }
 
@@ -399,11 +450,13 @@ impl<F: Fs> Storage<F> {
         self.fs.sync_dir()?;
 
         let old_snapshot_meta = self.latest_snapshot_meta;
-        self.latest_snapshot_meta = snapshot.meta;
+        self.latest_snapshot_meta = Some(snapshot.meta);
 
-        let old_snapshot_filename = Self::snapshot_filename_log(old_snapshot_meta);
-        self.fs.remove(&old_snapshot_filename)?;
-        self.fs.sync_dir()?;
+        if let Some(old_snapshot_meta) = self.latest_snapshot_meta {
+            let old_snapshot_filename = Self::snapshot_filename_log(old_snapshot_meta);
+            self.fs.remove(&old_snapshot_filename)?;
+            self.fs.sync_dir()?;
+        }
 
         Ok(())
     }
@@ -413,7 +466,8 @@ impl<F: Fs> Storage<F> {
         let segment_filename_tmp = Self::segment_filename_tmp(new_segment_id);
         let segment_filename_log = Self::segment_filename_log(new_segment_id);
 
-        self.fs.create(&segment_filename_tmp, SEGMENT_SIZE)?;
+        self.fs
+            .create(&segment_filename_tmp, wal_frame::SEGMENT_SIZE)?;
         self.fs.sync(&segment_filename_tmp)?;
         self.fs
             .rename(&segment_filename_tmp, &segment_filename_log)?;
