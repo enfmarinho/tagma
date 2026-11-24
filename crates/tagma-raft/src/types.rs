@@ -3,7 +3,7 @@ pub type LogIndex = u64;
 pub type Term = u64;
 pub type ReadId = u64;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HardState {
     pub term: Term,
