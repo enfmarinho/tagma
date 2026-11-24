@@ -3,4 +3,5 @@ mod snapshot_frame;
 mod storage;
 mod wal_frame;
 
-pub use storage::Storage;
+pub use fs::Fs;
+pub use storage::{Recovered, Storage};
