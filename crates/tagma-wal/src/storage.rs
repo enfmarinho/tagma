@@ -53,6 +53,7 @@ pub struct Storage<F: Fs> {
 }
 
 /// Raft state and snapshot payload reconstructed from disk on startup.
+#[derive(Default)]
 pub struct Recovered {
     pub restored: Restored,
     pub snapshot_data: Option<Vec<u8>>,
@@ -290,7 +291,7 @@ impl<F: Fs> Storage<F> {
     }
 
     fn load_snapshot(fs: &mut F, inv: &DirInventory) -> io::Result<Option<Snapshot>> {
-        let Some((meta, filename)) = inv.snapshots.last() else {
+        let Some((meta, _)) = inv.snapshots.last() else {
             return Ok(None);
         };
 
@@ -432,7 +433,7 @@ impl<F: Fs> Storage<F> {
     fn persist_snapshot(&mut self, snapshot: &Snapshot) -> io::Result<()> {
         let payload = &snapshot.data;
         let len = payload.len();
-        let num_bytes = 8 + 4 + len;
+        let num_bytes = SnapshotFrameHeader::LEN + len;
 
         self.scratch_buf.clear();
         self.scratch_buf.resize(num_bytes, 0);
@@ -455,7 +456,7 @@ impl<F: Fs> Storage<F> {
         let old_snapshot_meta = self.latest_snapshot_meta;
         self.latest_snapshot_meta = Some(snapshot.meta);
 
-        if let Some(old_snapshot_meta) = self.latest_snapshot_meta {
+        if let Some(old_snapshot_meta) = old_snapshot_meta {
             let old_snapshot_filename = Self::snapshot_filename_log(old_snapshot_meta);
             self.fs.remove(&old_snapshot_filename)?;
             self.fs.sync_dir()?;
