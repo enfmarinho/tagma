@@ -11,9 +11,14 @@ use tagma_raft::{HardState, LogIndex, Ready, Restored, Snapshot, SnapshotMeta};
 
 /// Filename prefix for segmented WAL files (`WAL_FILE_PREF-{segment_id}.log`).
 const WAL_FILE_PREF: &str = "wal";
-
 /// Filename prefix for state machine snapshots (`SNAPSHOT_FILE_PREF-{index}-{term}.log`).
 const SNAPSHOT_FILE_PREF: &str = "snapshot";
+// Temporary file extension.
+const TMP_FILE_EXT: &str = ".tmp";
+// Log file extension.
+const LOG_FILE_EXT: &str = ".log";
+/// Initial capacity of the scratch buffer.
+const SCRATCH_BUF_INIT_CAP: usize = 64 * 1024;
 
 /// WAL sealed segment metadata.
 struct SealedSegment {
@@ -34,7 +39,10 @@ pub struct Storage<F: Fs> {
     /// Max index present in the active WAL segment.
     active_segment_max_index: LogIndex,
 
-    /// Index when the latest snapshot was taken.
+    /// Latest hard state metadata.
+    latest_hard_state: HardState,
+
+    /// Metadata of the latest snapshot.
     latest_snapshot_meta: Option<SnapshotMeta>,
 
     /// Sealed segments metadata.
@@ -45,6 +53,7 @@ pub struct Storage<F: Fs> {
 }
 
 /// Raft state and snapshot payload reconstructed from disk on startup.
+#[derive(Default)]
 pub struct Recovered {
     pub restored: Restored,
     pub snapshot_data: Option<Vec<u8>>,
@@ -56,6 +65,26 @@ struct DirInventory {
 }
 
 impl<F: Fs> Storage<F> {
+    fn new(mut fs: F) -> io::Result<Self> {
+        for f in fs.list()? {
+            fs.remove(&f)?;
+        }
+
+        fs.create(&Self::segment_filename_log(1), wal_frame::SEGMENT_SIZE)?;
+        fs.sync_dir()?;
+
+        Ok(Self {
+            fs,
+            active_segment_id: 1,
+            active_segment_offset: 0,
+            active_segment_max_index: 0,
+            latest_hard_state: HardState::default(),
+            latest_snapshot_meta: None,
+            sealed_segments: VecDeque::new(),
+            scratch_buf: Vec::with_capacity(SCRATCH_BUF_INIT_CAP),
+        })
+    }
+
     fn scan_dir(fs: &mut F) -> io::Result<DirInventory> {
         let mut inv = DirInventory {
             segments: Vec::new(),
@@ -63,18 +92,17 @@ impl<F: Fs> Storage<F> {
         };
         let mut deleted = false;
 
-        for name in fs.list()? {
-            if let Some(id) = Self::parse_segment_filename(&name) {
-                inv.segments.push((id, name));
-            } else if let Some(meta) = Self::parse_snapshot_filename(&name) {
-                inv.snapshots.push((meta, name));
+        for f in fs.list()? {
+            if let Some(id) = Self::parse_segment_filename(&f) {
+                inv.segments.push((id, f));
+            } else if let Some(meta) = Self::parse_snapshot_filename(&f) {
+                inv.snapshots.push((meta, f));
             } else {
                 // `.tmp` files or any unrecognized file
-                fs.remove(&name)?;
+                fs.remove(&f)?;
                 deleted = true;
             }
         }
-
         if deleted {
             fs.sync_dir()?;
         }
@@ -108,32 +136,10 @@ impl<F: Fs> Storage<F> {
         let inv = Self::scan_dir(&mut fs)?;
 
         if inv.segments.is_empty() && inv.snapshots.is_empty() {
-            Self::init_fs(&mut fs)?;
-            return Ok((
-                Self {
-                    fs,
-                    active_segment_id: 1,
-                    active_segment_offset: 0,
-                    active_segment_max_index: 0,
-                    latest_snapshot_meta: None,
-                    sealed_segments: VecDeque::new(),
-                    scratch_buf: Vec::with_capacity(SEGMENT_SIZE),
-                },
-                Recovered {
-                    restored: Restored {
-                        hard_state: HardState {
-                            term: 0,
-                            voted_for: None,
-                        },
-                        snapshot: None,
-                        entries: Vec::new(),
-                    },
-                    snapshot_data: None,
-                },
-            ));
+            return Ok((Self::new(fs)?, Recovered::default()));
         }
 
-        Self::check_for_missing_segment(&mut fs, &inv)?;
+        Self::check_for_missing_segment(&inv)?;
 
         let snapshot = Self::load_snapshot(&mut fs, &inv)?;
         // Delete all snapshots older than the one used
@@ -209,6 +215,7 @@ impl<F: Fs> Storage<F> {
             Self {
                 fs,
                 active_segment_id: last_id,
+                latest_hard_state: last_hard_state,
                 latest_snapshot_meta: meta,
                 active_segment_offset: last_offset,
                 active_segment_max_index: last_max_index,
@@ -226,20 +233,14 @@ impl<F: Fs> Storage<F> {
         ))
     }
 
-    fn init_fs(fs: &mut F) -> io::Result<()> {
-        fs.create(&Self::segment_filename_log(1), wal_frame::SEGMENT_SIZE)?;
-        fs.sync_dir()?;
-        Ok(())
-    }
-
     fn segment_filename(id: u64) -> String {
         WAL_FILE_PREF.to_string() + "-" + &id.to_string()
     }
     fn segment_filename_log(id: u64) -> String {
-        Self::segment_filename(id) + ".log"
+        Self::segment_filename(id) + LOG_FILE_EXT
     }
     fn segment_filename_tmp(id: u64) -> String {
-        Self::segment_filename(id) + ".tmp"
+        Self::segment_filename(id) + TMP_FILE_EXT
     }
 
     fn snapshot_filename(meta: SnapshotMeta) -> String {
@@ -250,10 +251,7 @@ impl<F: Fs> Storage<F> {
             + &meta.last_term.to_string()
     }
     fn snapshot_filename_log(meta: SnapshotMeta) -> String {
-        Self::snapshot_filename(meta) + ".log"
-    }
-    fn snapshot_filename_tmp(meta: SnapshotMeta) -> String {
-        Self::snapshot_filename(meta) + ".tmp"
+        Self::snapshot_filename(meta) + LOG_FILE_EXT
     }
 
     fn parse_segment_filename(filename: &str) -> Option<u64> {
@@ -276,7 +274,7 @@ impl<F: Fs> Storage<F> {
         })
     }
 
-    fn check_for_missing_segment(fs: &mut F, inv: &DirInventory) -> io::Result<()> {
+    fn check_for_missing_segment(inv: &DirInventory) -> io::Result<()> {
         // TODO improve, this is to strict and may invalidate valid conditions
         for pair in inv.segments.windows(2) {
             if pair[1].0 != pair[0].0 + 1 {
@@ -293,7 +291,7 @@ impl<F: Fs> Storage<F> {
     }
 
     fn load_snapshot(fs: &mut F, inv: &DirInventory) -> io::Result<Option<Snapshot>> {
-        let Some((meta, filename)) = inv.snapshots.last() else {
+        let Some((meta, _)) = inv.snapshots.last() else {
             return Ok(None);
         };
 
@@ -368,50 +366,56 @@ impl<F: Fs> Storage<F> {
     /// on error durability is not garanteed and the caller cannot proceed with the
     /// [`Ready`] contract, i.e. cannot procede to step 2.
     pub fn persist(&mut self, ready: &Ready) -> io::Result<()> {
-        // if let Some(snapshot) = &ready.snapshot {
-        //     self.persist_snapshot(snapshot)?;
-        // }
-        //
-        // let batch = Batch::new(ready);
-        // self.scratch_buf.clear();
-        // frame::encode(&batch, &mut self.scratch_buf);
-        //
-        // let payload_len = self.scratch_buf[WalFrameHeader::LEN..].len();
-        //
-        // if payload_len > SEGMENT_SIZE {
-        //     // this is an unrealistic control path, considering the unlikelihood of the
-        //     // Vec<Entry> growing so much to make this happens. I believe its impossible
-        //     return Err(Error::new(
-        //         io::ErrorKind::InvalidInput,
-        //         "Payload is bigger than a segment file.",
-        //     ));
-        // }
-        //
-        // // Create new segment
-        // if payload_len + self.active_segment_offset > SEGMENT_SIZE {
-        //     self.new_segment()?;
-        // }
-        //
-        // if let Some(max_index) = ready.entries.last().map(|e| e.index) {
-        //     self.active_segment_max_index = max_index;
-        // };
-        // let payload = &self.scratch_buf[WalFrameHeader::LEN..];
-        //
-        // // Safety: this cast to u32 is safe since payload_len is smaller than SEGMENT_SIZE
-        // let frame_header = WalFrameHeader::new(payload_len as u32, crc32fast::hash(payload));
-        //
-        // self.scratch_buf[..WalFrameHeader::LEN].copy_from_slice(&frame_header.to_bytes());
-        //
-        // let segment_filename = &Self::segment_filename(self.active_segment_id);
-        // let segment_filename_tmp = &(segment_filename.clone() + ".tmp");
-        // let segment_filename_log = &(segment_filename.clone() + ".log");
-        //
-        // self.fs.write(segment_filename_tmp, &self.scratch_buf)?;
-        // self.fs.sync(segment_filename_tmp)?;
-        //
-        // self.fs.rename(segment_filename_tmp, segment_filename_log)?;
-        // self.fs.sync_dir()?;
-        //
+        if let Some(snapshot) = &ready.snapshot {
+            self.persist_snapshot(snapshot)?;
+        }
+
+        if let Some(hs) = ready.hard_state {
+            self.latest_hard_state = hs;
+        }
+        if let Some(snapshot) = &ready.snapshot {
+            self.latest_snapshot_meta = Some(snapshot.meta);
+        }
+
+        let batch = wal_frame::WalBatch::from_ready(
+            ready,
+            self.latest_hard_state,
+            self.latest_snapshot_meta,
+        );
+        self.scratch_buf.clear();
+        wal_frame::WalFrame::encode(&batch, &mut self.scratch_buf)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Could not encode ready!"))?;
+
+        let payload_len = self.scratch_buf.len();
+
+        if payload_len > SEGMENT_SIZE {
+            // this is an unrealistic control path, considering the unlikelihood of the
+            // Vec<Entry> growing so much to make this happens. I believe its impossible
+            return Err(Error::new(
+                io::ErrorKind::InvalidInput,
+                "Payload is bigger than a segment file.",
+            ));
+        }
+
+        // Create new segment
+        if payload_len + self.active_segment_offset > SEGMENT_SIZE {
+            self.new_segment()?;
+        }
+
+        if let Some(max_index) = ready.entries.last().map(|e| e.index) {
+            self.active_segment_max_index = max_index;
+        };
+
+        let segment_filename = &Self::segment_filename(self.active_segment_id);
+        let segment_filename_tmp = &(segment_filename.clone() + ".tmp");
+        let segment_filename_log = &(segment_filename.clone() + ".log");
+
+        self.fs.write(segment_filename_tmp, &self.scratch_buf)?;
+        self.fs.sync(segment_filename_tmp)?;
+
+        self.fs.rename(segment_filename_tmp, segment_filename_log)?;
+        self.fs.sync_dir()?;
+
         Ok(())
     }
 
@@ -429,7 +433,7 @@ impl<F: Fs> Storage<F> {
     fn persist_snapshot(&mut self, snapshot: &Snapshot) -> io::Result<()> {
         let payload = &snapshot.data;
         let len = payload.len();
-        let num_bytes = 8 + 4 + len;
+        let num_bytes = SnapshotFrameHeader::LEN + len;
 
         self.scratch_buf.clear();
         self.scratch_buf.resize(num_bytes, 0);
@@ -452,7 +456,7 @@ impl<F: Fs> Storage<F> {
         let old_snapshot_meta = self.latest_snapshot_meta;
         self.latest_snapshot_meta = Some(snapshot.meta);
 
-        if let Some(old_snapshot_meta) = self.latest_snapshot_meta {
+        if let Some(old_snapshot_meta) = old_snapshot_meta {
             let old_snapshot_filename = Self::snapshot_filename_log(old_snapshot_meta);
             self.fs.remove(&old_snapshot_filename)?;
             self.fs.sync_dir()?;
@@ -485,11 +489,34 @@ impl<F: Fs> Storage<F> {
     }
 
     /// Clean up storage space by removing superseded WAL segments.
-    /// Delete all segments whose max stored log index is smaller than `compact_to`.
+    /// Delete all segments whose max stored log index is smaller than `compact_to`,
+    /// given that there is a valid snapshot, i.e. a snapshot whose index is bigger
+    /// than `compact_to`.
     ///
     /// # Errors
     /// Returns an [`io::Error`] in case any underlying `fs` operations fails.
     pub fn compact(&mut self, compact_to: LogIndex) -> io::Result<()> {
-        todo!()
+        let meta = if let Some(meta) = self.latest_snapshot_meta {
+            meta
+        } else {
+            return Ok(());
+        };
+
+        if meta.last_index < compact_to {
+            return Ok(());
+        }
+
+        let mut removed = false;
+        for segment in &self.sealed_segments {
+            if segment.max_index < compact_to {
+                self.fs.remove(&Self::segment_filename_log(segment.id))?;
+                removed = true;
+            }
+        }
+        if removed {
+            self.fs.sync_dir()?;
+        }
+
+        Ok(())
     }
 }

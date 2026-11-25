@@ -485,10 +485,6 @@ impl<'a> WriteCursor<'a> {
         self.offset += 1;
     }
 
-    fn write_u32(&mut self, v: u32) {
-        self.write_bytes(&v.to_le_bytes());
-    }
-
     fn write_u64(&mut self, v: u64) {
         self.write_bytes(&v.to_le_bytes());
     }
