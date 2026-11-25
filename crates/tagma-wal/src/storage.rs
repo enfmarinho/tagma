@@ -499,11 +499,34 @@ impl<F: Fs> Storage<F> {
     }
 
     /// Clean up storage space by removing superseded WAL segments.
-    /// Delete all segments whose max stored log index is smaller than `compact_to`.
+    /// Delete all segments whose max stored log index is smaller than `compact_to`,
+    /// given that there is a valid snapshot, i.e. a snapshot whose index is bigger
+    /// than `compact_to`.
     ///
     /// # Errors
     /// Returns an [`io::Error`] in case any underlying `fs` operations fails.
-    pub fn compact(&mut self, _compact_to: LogIndex) -> io::Result<()> {
-        todo!()
+    pub fn compact(&mut self, compact_to: LogIndex) -> io::Result<()> {
+        let meta = if let Some(meta) = self.latest_snapshot_meta {
+            meta
+        } else {
+            return Ok(());
+        };
+
+        if meta.last_index < compact_to {
+            return Ok(());
+        }
+
+        let mut removed = false;
+        for segment in &self.sealed_segments {
+            if segment.max_index < compact_to {
+                self.fs.remove(&Self::segment_filename_log(segment.id))?;
+                removed = true;
+            }
+        }
+        if removed {
+            self.fs.sync_dir()?;
+        }
+
+        Ok(())
     }
 }
