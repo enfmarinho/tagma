@@ -11,14 +11,13 @@ use tagma_raft::{HardState, LogIndex, Ready, Restored, Snapshot, SnapshotMeta};
 
 /// Filename prefix for segmented WAL files (`WAL_FILE_PREF-{segment_id}.log`).
 const WAL_FILE_PREF: &str = "wal";
-
-const TMP_FILE_EXT: &str = ".tmp";
-const LOG_FILE_EXT: &str = ".log";
-
 /// Filename prefix for state machine snapshots (`SNAPSHOT_FILE_PREF-{index}-{term}.log`).
 const SNAPSHOT_FILE_PREF: &str = "snapshot";
-
-/// Initial capacity of the scratch buffer
+// Temporary file extension.
+const TMP_FILE_EXT: &str = ".tmp";
+// Log file extension.
+const LOG_FILE_EXT: &str = ".log";
+/// Initial capacity of the scratch buffer.
 const SCRATCH_BUF_INIT_CAP: usize = 64 * 1024;
 
 /// WAL sealed segment metadata.
@@ -40,10 +39,10 @@ pub struct Storage<F: Fs> {
     /// Max index present in the active WAL segment.
     active_segment_max_index: LogIndex,
 
-    /// Latest hard state
+    /// Latest hard state metadata.
     latest_hard_state: HardState,
 
-    /// Index when the latest snapshot was taken.
+    /// Metadata of the latest snapshot.
     latest_snapshot_meta: Option<SnapshotMeta>,
 
     /// Sealed segments metadata.
@@ -92,18 +91,17 @@ impl<F: Fs> Storage<F> {
         };
         let mut deleted = false;
 
-        for name in fs.list()? {
-            if let Some(id) = Self::parse_segment_filename(&name) {
-                inv.segments.push((id, name));
-            } else if let Some(meta) = Self::parse_snapshot_filename(&name) {
-                inv.snapshots.push((meta, name));
+        for f in fs.list()? {
+            if let Some(id) = Self::parse_segment_filename(&f) {
+                inv.segments.push((id, f));
+            } else if let Some(meta) = Self::parse_snapshot_filename(&f) {
+                inv.snapshots.push((meta, f));
             } else {
                 // `.tmp` files or any unrecognized file
-                fs.remove(&name)?;
+                fs.remove(&f)?;
                 deleted = true;
             }
         }
-
         if deleted {
             fs.sync_dir()?;
         }
@@ -242,12 +240,6 @@ impl<F: Fs> Storage<F> {
                 snapshot_data: snapshot.map(|s| s.data),
             },
         ))
-    }
-
-    fn init_fs(fs: &mut F) -> io::Result<()> {
-        fs.create(&Self::segment_filename_log(1), wal_frame::SEGMENT_SIZE)?;
-        fs.sync_dir()?;
-        Ok(())
     }
 
     fn segment_filename(id: u64) -> String {
