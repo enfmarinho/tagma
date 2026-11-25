@@ -135,17 +135,7 @@ impl<F: Fs> Storage<F> {
         let inv = Self::scan_dir(&mut fs)?;
 
         if inv.segments.is_empty() && inv.snapshots.is_empty() {
-            return Ok((
-                Self::new(fs)?,
-                Recovered {
-                    restored: Restored {
-                        hard_state: HardState::default(),
-                        snapshot: None,
-                        entries: Vec::new(),
-                    },
-                    snapshot_data: None,
-                },
-            ));
+            return Ok((Self::new(fs)?, Recovered::default()));
         }
 
         Self::check_for_missing_segment(&inv)?;
