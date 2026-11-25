@@ -18,6 +18,9 @@ const LOG_FILE_EXT: &str = ".log";
 /// Filename prefix for state machine snapshots (`SNAPSHOT_FILE_PREF-{index}-{term}.log`).
 const SNAPSHOT_FILE_PREF: &str = "snapshot";
 
+/// Initial capacity of the scratch buffer
+const SCRATCH_BUF_INIT_CAP: usize = 64 * 1024;
+
 /// WAL sealed segment metadata.
 struct SealedSegment {
     id: u64,
@@ -62,6 +65,26 @@ struct DirInventory {
 }
 
 impl<F: Fs> Storage<F> {
+    fn new(mut fs: F) -> io::Result<Self> {
+        for f in fs.list()? {
+            fs.remove(&f)?;
+        }
+
+        fs.create(&Self::segment_filename_log(1), wal_frame::SEGMENT_SIZE)?;
+        fs.sync_dir()?;
+
+        Ok(Self {
+            fs,
+            active_segment_id: 1,
+            active_segment_offset: 0,
+            active_segment_max_index: 0,
+            latest_hard_state: HardState::default(),
+            latest_snapshot_meta: None,
+            sealed_segments: VecDeque::new(),
+            scratch_buf: Vec::with_capacity(SCRATCH_BUF_INIT_CAP),
+        })
+    }
+
     fn scan_dir(fs: &mut F) -> io::Result<DirInventory> {
         let mut inv = DirInventory {
             segments: Vec::new(),
@@ -114,27 +137,11 @@ impl<F: Fs> Storage<F> {
         let inv = Self::scan_dir(&mut fs)?;
 
         if inv.segments.is_empty() && inv.snapshots.is_empty() {
-            Self::init_fs(&mut fs)?;
             return Ok((
-                Self {
-                    fs,
-                    active_segment_id: 1,
-                    active_segment_offset: 0,
-                    active_segment_max_index: 0,
-                    latest_hard_state: HardState {
-                        term: 0,
-                        voted_for: None,
-                    },
-                    latest_snapshot_meta: None,
-                    sealed_segments: VecDeque::new(),
-                    scratch_buf: Vec::with_capacity(SEGMENT_SIZE),
-                },
+                Self::new(fs)?,
                 Recovered {
                     restored: Restored {
-                        hard_state: HardState {
-                            term: 0,
-                            voted_for: None,
-                        },
+                        hard_state: HardState::default(),
                         snapshot: None,
                         entries: Vec::new(),
                     },
