@@ -47,7 +47,7 @@ pub struct ReadReady {
     pub index: LogIndex,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Restored {
     pub hard_state: HardState,
     pub snapshot: Option<SnapshotMeta>,
