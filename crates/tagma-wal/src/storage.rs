@@ -1,7 +1,7 @@
 use crate::{
     fs::Fs,
     snapshot_frame::SnapshotFrameHeader,
-    wal_frame::{self, SEGMENT_SIZE},
+    wal_frame::{self, SEGMENT_SIZE, WalBatch, WalFrame},
 };
 use std::{
     collections::VecDeque,
@@ -376,20 +376,14 @@ impl<F: Fs> Storage<F> {
             self.latest_hard_state = hs;
         }
 
-        let batch = wal_frame::WalBatch::from_ready(
-            ready,
-            self.latest_hard_state,
-            self.latest_snapshot_meta,
-        );
+        let batch = WalBatch::from_ready(ready, self.latest_hard_state, self.latest_snapshot_meta);
         self.scratch_buf.clear();
-        wal_frame::WalFrame::encode(&batch, &mut self.scratch_buf)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Could not encode ready!"))?;
+        WalFrame::encode(&batch, &mut self.scratch_buf)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Could not encode ready."))?;
 
-        let payload_len = self.scratch_buf.len();
+        let len = self.scratch_buf.len();
 
-        if payload_len > SEGMENT_SIZE {
-            // this is an unrealistic control path, considering the unlikelihood of the
-            // Vec<Entry> growing so much to make this happens. I believe its impossible
+        if len > SEGMENT_SIZE {
             return Err(Error::new(
                 io::ErrorKind::InvalidInput,
                 "Payload is bigger than a segment file.",
@@ -397,7 +391,7 @@ impl<F: Fs> Storage<F> {
         }
 
         // Create new segment
-        if payload_len + self.active_segment_offset > SEGMENT_SIZE {
+        if len + self.active_segment_offset > SEGMENT_SIZE {
             self.new_segment()?;
         }
 
