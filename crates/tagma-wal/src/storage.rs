@@ -1,7 +1,7 @@
 use crate::{
     fs::Fs,
     snapshot_frame::SnapshotFrameHeader,
-    wal_frame::{self, SEGMENT_SIZE},
+    wal_frame::{self, SEGMENT_SIZE, WalBatch, WalFrame},
 };
 use std::{
     collections::VecDeque,
@@ -299,11 +299,11 @@ impl<F: Fs> Storage<F> {
 
         let filename = Self::snapshot_filename_log(*meta);
         let snapshot_frame_data = fs.read(&filename)?;
-        let Some(mut snapshot_frame_data) = snapshot_frame_data else {
+        let Some(mut raw_bytes) = snapshot_frame_data else {
             return Ok(None);
         };
 
-        let (frame_header_bytes, _) = snapshot_frame_data.split_at(SnapshotFrameHeader::LEN);
+        let (frame_header_bytes, _) = raw_bytes.split_at(SnapshotFrameHeader::LEN);
 
         let frame_header_bytes = frame_header_bytes
             .try_into()
@@ -311,12 +311,10 @@ impl<F: Fs> Storage<F> {
 
         let snapshot_header = SnapshotFrameHeader::from_bytes(frame_header_bytes);
 
-        snapshot_frame_data.copy_within(SnapshotFrameHeader::LEN.., 0);
-        snapshot_frame_data.truncate(snapshot_frame_data.len() - SnapshotFrameHeader::LEN);
+        raw_bytes.copy_within(SnapshotFrameHeader::LEN.., 0);
+        raw_bytes.truncate(raw_bytes.len() - SnapshotFrameHeader::LEN);
 
-        let snapshot_bytes = snapshot_frame_data;
-
-        let crc = crc32fast::hash(&snapshot_bytes);
+        let crc = crc32fast::hash(&raw_bytes);
 
         if crc != snapshot_header.crc {
             return Err(io::Error::new(
@@ -324,7 +322,7 @@ impl<F: Fs> Storage<F> {
                 "Invalid snapshot: CRC key does not match.",
             ));
         }
-        if snapshot_bytes.len() != snapshot_header.len {
+        if raw_bytes.len() != snapshot_header.len {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Invalid snapshot: file lenght does not match expected `len`.",
@@ -333,7 +331,7 @@ impl<F: Fs> Storage<F> {
 
         Ok(Some(Snapshot {
             meta: *meta,
-            data: snapshot_bytes,
+            data: raw_bytes,
         }))
     }
 
@@ -375,24 +373,15 @@ impl<F: Fs> Storage<F> {
         if let Some(hs) = ready.hard_state {
             self.latest_hard_state = hs;
         }
-        if let Some(snapshot) = &ready.snapshot {
-            self.latest_snapshot_meta = Some(snapshot.meta);
-        }
 
-        let batch = wal_frame::WalBatch::from_ready(
-            ready,
-            self.latest_hard_state,
-            self.latest_snapshot_meta,
-        );
+        let batch = WalBatch::from_ready(ready, self.latest_hard_state, self.latest_snapshot_meta);
         self.scratch_buf.clear();
-        wal_frame::WalFrame::encode(&batch, &mut self.scratch_buf)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Could not encode ready!"))?;
+        WalFrame::encode(&batch, &mut self.scratch_buf)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Could not encode ready."))?;
 
-        let payload_len = self.scratch_buf.len();
+        let len = self.scratch_buf.len();
 
-        if payload_len > SEGMENT_SIZE {
-            // this is an unrealistic control path, considering the unlikelihood of the
-            // Vec<Entry> growing so much to make this happens. I believe its impossible
+        if len > SEGMENT_SIZE {
             return Err(Error::new(
                 io::ErrorKind::InvalidInput,
                 "Payload is bigger than a segment file.",
@@ -400,7 +389,7 @@ impl<F: Fs> Storage<F> {
         }
 
         // Create new segment
-        if payload_len + self.active_segment_offset > SEGMENT_SIZE {
+        if len + self.active_segment_offset > SEGMENT_SIZE {
             self.new_segment()?;
         }
 
