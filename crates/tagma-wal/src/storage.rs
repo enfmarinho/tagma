@@ -233,27 +233,32 @@ impl<F: Fs> Storage<F> {
         ))
     }
 
-    fn segment_filename(id: u64) -> String {
-        WAL_FILE_PREF.to_string() + "-" + &id.to_string()
+    fn segment_filename_with_ext(id: u64, ext:&str) -> String {
+        format!(
+            "{}-{}{}",
+            WAL_FILE_PREF, id, ext
+        )
     }
     fn segment_filename_log(id: u64) -> String {
-        Self::segment_filename(id) + LOG_FILE_EXT
+        Self::segment_filename_with_ext(id, LOG_FILE_EXT) 
     }
     fn segment_filename_tmp(id: u64) -> String {
-        Self::segment_filename(id) + TMP_FILE_EXT
+        Self::segment_filename_with_ext(id, TMP_FILE_EXT) 
     }
 
-    fn snapshot_filename(meta: SnapshotMeta) -> String {
-        SNAPSHOT_FILE_PREF.to_string()
-            + "-"
-            + &meta.last_index.to_string()
-            + "-"
-            + &meta.last_term.to_string()
+    fn snapshot_filename_with_ext(meta: SnapshotMeta, ext: &str) -> String {
+        format!(
+            "{}-{}-{}{}",
+            SNAPSHOT_FILE_PREF, meta.last_index, meta.last_term, ext
+        )
     }
     fn snapshot_filename_log(meta: SnapshotMeta) -> String {
-        Self::snapshot_filename(meta) + LOG_FILE_EXT
+        Self::snapshot_filename_with_ext(meta, LOG_FILE_EXT)
     }
-
+    fn snapshot_filename_tmp(meta: SnapshotMeta) -> String {
+        Self::snapshot_filename_with_ext(meta, TMP_FILE_EXT)
+    }
+    
     fn parse_segment_filename(filename: &str) -> Option<u64> {
         filename
             .strip_prefix(WAL_FILE_PREF)?
@@ -406,14 +411,12 @@ impl<F: Fs> Storage<F> {
             self.active_segment_max_index = max_index;
         };
 
-        let segment_filename = &Self::segment_filename(self.active_segment_id);
-        let segment_filename_tmp = &(segment_filename.clone() + ".tmp");
-        let segment_filename_log = &(segment_filename.clone() + ".log");
+        let filename_tmp = Self::segment_filename_tmp(self.active_segment_id);
+        self.fs.write(&filename_tmp, &self.scratch_buf)?;
+        self.fs.sync(&filename_tmp)?;
 
-        self.fs.write(segment_filename_tmp, &self.scratch_buf)?;
-        self.fs.sync(segment_filename_tmp)?;
-
-        self.fs.rename(segment_filename_tmp, segment_filename_log)?;
+        let filename_log = Self::segment_filename_log(self.active_segment_id);
+        self.fs.rename(&filename_tmp, &filename_log)?;
         self.fs.sync_dir()?;
 
         Ok(())
@@ -442,21 +445,20 @@ impl<F: Fs> Storage<F> {
         self.scratch_buf[..SnapshotFrameHeader::LEN].copy_from_slice(&frame_header.to_bytes());
         self.scratch_buf.extend_from_slice(payload);
 
-        let snapshot_filename = &Self::snapshot_filename(snapshot.meta);
-        let snapshot_filename_tmp = &(snapshot_filename.clone() + ".tmp");
-        let snapshot_filename_log = &(snapshot_filename.clone() + ".log");
+        let filename_tmp = Self::snapshot_filename_tmp(snapshot.meta);
 
-        self.fs.write(snapshot_filename_tmp, &self.scratch_buf)?;
-        self.fs.sync(snapshot_filename_tmp)?;
+        self.fs.write(&filename_tmp, &self.scratch_buf)?;
+        self.fs.sync(&filename_tmp)?;
 
+        let filename_log = Self::snapshot_filename_log(snapshot.meta);
         self.fs
-            .rename(snapshot_filename_tmp, snapshot_filename_log)?;
+            .rename(&filename_tmp, &filename_log)?;
         self.fs.sync_dir()?;
 
-        let old_snapshot_meta = self.latest_snapshot_meta;
+        let old_meta = self.latest_snapshot_meta;
         self.latest_snapshot_meta = Some(snapshot.meta);
 
-        if let Some(old_snapshot_meta) = old_snapshot_meta {
+        if let Some(old_snapshot_meta) = old_meta {
             let old_snapshot_filename = Self::snapshot_filename_log(old_snapshot_meta);
             self.fs.remove(&old_snapshot_filename)?;
             self.fs.sync_dir()?;
@@ -467,14 +469,15 @@ impl<F: Fs> Storage<F> {
 
     fn new_segment(&mut self) -> io::Result<()> {
         let new_segment_id = self.active_segment_id + 1;
-        let segment_filename_tmp = Self::segment_filename_tmp(new_segment_id);
-        let segment_filename_log = Self::segment_filename_log(new_segment_id);
 
+        let filename_tmp = Self::segment_filename_tmp(new_segment_id);
         self.fs
-            .create(&segment_filename_tmp, wal_frame::SEGMENT_SIZE)?;
-        self.fs.sync(&segment_filename_tmp)?;
+            .create(&filename_tmp, wal_frame::SEGMENT_SIZE)?;
+        self.fs.sync(&filename_tmp)?;
+
+        let filename_log = Self::segment_filename_log(new_segment_id);
         self.fs
-            .rename(&segment_filename_tmp, &segment_filename_log)?;
+            .rename(&filename_tmp, &filename_log)?;
         self.fs.sync_dir()?;
 
         self.sealed_segments.push_back(SealedSegment {
