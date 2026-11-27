@@ -299,11 +299,11 @@ impl<F: Fs> Storage<F> {
 
         let filename = Self::snapshot_filename_log(*meta);
         let snapshot_frame_data = fs.read(&filename)?;
-        let Some(mut snapshot_frame_data) = snapshot_frame_data else {
+        let Some(mut raw_bytes) = snapshot_frame_data else {
             return Ok(None);
         };
 
-        let (frame_header_bytes, _) = snapshot_frame_data.split_at(SnapshotFrameHeader::LEN);
+        let (frame_header_bytes, _) = raw_bytes.split_at(SnapshotFrameHeader::LEN);
 
         let frame_header_bytes = frame_header_bytes
             .try_into()
@@ -311,11 +311,11 @@ impl<F: Fs> Storage<F> {
 
         let snapshot_header = SnapshotFrameHeader::from_bytes(frame_header_bytes);
 
-        snapshot_frame_data.copy_within(SnapshotFrameHeader::LEN.., 0);
-        snapshot_frame_data.truncate(snapshot_frame_data.len() - SnapshotFrameHeader::LEN);
+        raw_bytes.copy_within(SnapshotFrameHeader::LEN.., 0);
+        raw_bytes.truncate(raw_bytes.len() - SnapshotFrameHeader::LEN);
 
 
-        let crc = crc32fast::hash(&snapshot_frame_data);
+        let crc = crc32fast::hash(&raw_bytes);
 
         if crc != snapshot_header.crc {
             return Err(io::Error::new(
@@ -323,7 +323,7 @@ impl<F: Fs> Storage<F> {
                 "Invalid snapshot: CRC key does not match.",
             ));
         }
-        if snapshot_frame_data.len() != snapshot_header.len {
+        if raw_bytes.len() != snapshot_header.len {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Invalid snapshot: file lenght does not match expected `len`.",
@@ -332,7 +332,7 @@ impl<F: Fs> Storage<F> {
 
         Ok(Some(Snapshot {
             meta: *meta,
-            data: snapshot_frame_data
+            data: raw_bytes
         }))
     }
 
