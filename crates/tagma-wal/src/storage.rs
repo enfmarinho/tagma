@@ -477,13 +477,13 @@ impl<F: Fs> Storage<F> {
             .rename(&segment_filename_tmp, &segment_filename_log)?;
         self.fs.sync_dir()?;
 
-        self.active_segment_id += 1;
-        self.active_segment_offset = 0;
-        self.active_segment_max_index = 0;
         self.sealed_segments.push_back(SealedSegment {
             id: self.active_segment_id,
             max_index: self.active_segment_max_index,
         });
+        self.active_segment_id += 1;
+        self.active_segment_offset = 0;
+        self.active_segment_max_index = 0;
 
         Ok(())
     }
