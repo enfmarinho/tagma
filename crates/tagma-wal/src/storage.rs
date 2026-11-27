@@ -314,7 +314,6 @@ impl<F: Fs> Storage<F> {
         raw_bytes.copy_within(SnapshotFrameHeader::LEN.., 0);
         raw_bytes.truncate(raw_bytes.len() - SnapshotFrameHeader::LEN);
 
-
         let crc = crc32fast::hash(&raw_bytes);
 
         if crc != snapshot_header.crc {
@@ -332,7 +331,7 @@ impl<F: Fs> Storage<F> {
 
         Ok(Some(Snapshot {
             meta: *meta,
-            data: raw_bytes
+            data: raw_bytes,
         }))
     }
 
