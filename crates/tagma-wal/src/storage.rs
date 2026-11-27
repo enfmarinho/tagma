@@ -314,9 +314,8 @@ impl<F: Fs> Storage<F> {
         snapshot_frame_data.copy_within(SnapshotFrameHeader::LEN.., 0);
         snapshot_frame_data.truncate(snapshot_frame_data.len() - SnapshotFrameHeader::LEN);
 
-        let snapshot_bytes = snapshot_frame_data;
 
-        let crc = crc32fast::hash(&snapshot_bytes);
+        let crc = crc32fast::hash(&snapshot_frame_data);
 
         if crc != snapshot_header.crc {
             return Err(io::Error::new(
@@ -324,7 +323,7 @@ impl<F: Fs> Storage<F> {
                 "Invalid snapshot: CRC key does not match.",
             ));
         }
-        if snapshot_bytes.len() != snapshot_header.len {
+        if snapshot_frame_data.len() != snapshot_header.len {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Invalid snapshot: file lenght does not match expected `len`.",
@@ -333,7 +332,7 @@ impl<F: Fs> Storage<F> {
 
         Ok(Some(Snapshot {
             meta: *meta,
-            data: snapshot_bytes,
+            data: snapshot_frame_data
         }))
     }
 
