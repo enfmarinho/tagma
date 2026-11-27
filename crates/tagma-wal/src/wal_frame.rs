@@ -489,33 +489,3 @@ impl<'a> WriteCursor<'a> {
         self.write_bytes(&v.to_le_bytes());
     }
 }
-
-// fn decode_batch(buf: &[u8]) -> Option<OwnedBatch> {
-//     let mut entries = Vec::new();
-//     for _ in 0..entry_count {
-//         let index = c.read_u64()?;
-//         let term = c.read_u64()?;
-//         let payload_type = c.read_u8()?;
-//         let len = c.read_u32()?;
-//         let data = c.read_bytes(len as usize)?.to_vec();
-//
-//         let payload = match payload_type {
-//             PAYLOAD_NOOP => Payload::Noop,
-//             PAYLOAD_COMMAND => Payload::Command(data),
-//             _ => return None,
-//         };
-//
-//         entries.push(Entry {
-//             term,
-//             index,
-//             payload,
-//         });
-//     }
-//
-//     Some(OwnedBatch {
-//         hard_state,
-//         truncate_from,
-//         snapshot_meta,
-//         entries,
-//     })
-// }
