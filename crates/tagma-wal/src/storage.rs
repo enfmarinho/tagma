@@ -233,17 +233,14 @@ impl<F: Fs> Storage<F> {
         ))
     }
 
-    fn segment_filename_with_ext(id: u64, ext:&str) -> String {
-        format!(
-            "{}-{}{}",
-            WAL_FILE_PREF, id, ext
-        )
+    fn segment_filename_with_ext(id: u64, ext: &str) -> String {
+        format!("{}-{}{}", WAL_FILE_PREF, id, ext)
     }
     fn segment_filename_log(id: u64) -> String {
-        Self::segment_filename_with_ext(id, LOG_FILE_EXT) 
+        Self::segment_filename_with_ext(id, LOG_FILE_EXT)
     }
     fn segment_filename_tmp(id: u64) -> String {
-        Self::segment_filename_with_ext(id, TMP_FILE_EXT) 
+        Self::segment_filename_with_ext(id, TMP_FILE_EXT)
     }
 
     fn snapshot_filename_with_ext(meta: SnapshotMeta, ext: &str) -> String {
@@ -258,7 +255,7 @@ impl<F: Fs> Storage<F> {
     fn snapshot_filename_tmp(meta: SnapshotMeta) -> String {
         Self::snapshot_filename_with_ext(meta, TMP_FILE_EXT)
     }
-    
+
     fn parse_segment_filename(filename: &str) -> Option<u64> {
         filename
             .strip_prefix(WAL_FILE_PREF)?
@@ -451,8 +448,7 @@ impl<F: Fs> Storage<F> {
         self.fs.sync(&filename_tmp)?;
 
         let filename_log = Self::snapshot_filename_log(snapshot.meta);
-        self.fs
-            .rename(&filename_tmp, &filename_log)?;
+        self.fs.rename(&filename_tmp, &filename_log)?;
         self.fs.sync_dir()?;
 
         let old_meta = self.latest_snapshot_meta;
@@ -471,13 +467,11 @@ impl<F: Fs> Storage<F> {
         let new_segment_id = self.active_segment_id + 1;
 
         let filename_tmp = Self::segment_filename_tmp(new_segment_id);
-        self.fs
-            .create(&filename_tmp, wal_frame::SEGMENT_SIZE)?;
+        self.fs.create(&filename_tmp, wal_frame::SEGMENT_SIZE)?;
         self.fs.sync(&filename_tmp)?;
 
         let filename_log = Self::segment_filename_log(new_segment_id);
-        self.fs
-            .rename(&filename_tmp, &filename_log)?;
+        self.fs.rename(&filename_tmp, &filename_log)?;
         self.fs.sync_dir()?;
 
         self.sealed_segments.push_back(SealedSegment {
