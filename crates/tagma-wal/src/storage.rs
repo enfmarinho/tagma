@@ -375,9 +375,6 @@ impl<F: Fs> Storage<F> {
         if let Some(hs) = ready.hard_state {
             self.latest_hard_state = hs;
         }
-        if let Some(snapshot) = &ready.snapshot {
-            self.latest_snapshot_meta = Some(snapshot.meta);
-        }
 
         let batch = wal_frame::WalBatch::from_ready(
             ready,
